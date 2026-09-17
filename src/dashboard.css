@@ -80,12 +80,12 @@ body {
   height: 100%;
   display: grid;
   grid-template-columns: var(--filter-width, 210px) 8px minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 0;
 }
 .dashboard-browser .filter-panel {
   grid-column: 1;
-  grid-row: 1 / 3;
+  grid-row: 1 / 4;
   overflow: auto;
   padding: 18px 14px;
   margin: 0;
@@ -106,13 +106,13 @@ body {
 }
 .dashboard-browser .result-heading {
   grid-column: 3;
-  grid-row: 1;
+  grid-row: 2;
   padding: 15px 18px;
   margin: 0;
 }
 .dashboard-browser .tag-results {
   grid-column: 3;
-  grid-row: 2;
+  grid-row: 3;
   overflow: auto;
   padding: 0 12px 16px;
   min-height: 0;
@@ -531,4 +531,32 @@ body {
     padding: 8px 12px;
     gap: 8px;
   }
+}
+
+/* Library-wide management and explicit selected-page operations. */
+.bulk-toolbar { grid-column: 3; grid-row: 1; padding: 12px; border-bottom: 1px solid #354053; min-width: 0; max-height: 42vh; overflow: auto; flex-shrink: 0; }
+.bulk-toolbar .row { margin-bottom: 6px; }
+.bulk-toolbar button { white-space: normal; text-align: left; }
+.bulk-toolbar fieldset, .taxonomy-dialog fieldset { border: 0; padding: 0; margin: 10px 0; min-width: 0; }
+.bulk-options { display: flex; flex-wrap: wrap; gap: 8px; max-height: 150px; overflow: auto; margin: 8px 0; }
+.bulk-options label { display: flex; align-items: center; gap: 6px; padding: 6px 9px; border: 1px solid #354053; border-radius: 7px; }
+.bulk-options input, .article-checkbox input { width: auto; accent-color: #7dd8be; }
+.article-checkbox { display: flex; align-items: center; gap: 6px; position: relative; z-index: 1; margin-bottom: 8px; width: fit-content; cursor: pointer; }
+.taxonomy-dialog { color: #e2e8f0; background: #10151d; border: 1px solid #46566f; border-radius: 14px; width: min(640px, calc(100vw - 40px)); max-height: calc(100dvh - 40px); box-sizing: border-box; padding: 20px; overflow: auto; }
+.taxonomy-dialog::backdrop { background: #000b; }
+.taxonomy-dialog h2 { margin: 0; font-size: 19px; }
+.taxonomy-dialog p { color: #a9b8ca; }
+.taxonomy-dialog input, .taxonomy-dialog select { box-sizing: border-box; width: 100%; margin: 8px 0; }
+.taxonomy-list { max-height: 240px; overflow: auto; margin: 10px 0 16px; }
+.taxonomy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid #293344; }
+.taxonomy-row span, .taxonomy-row button { overflow-wrap: anywhere; white-space: normal; }
+.taxonomy-danger { border-top: 1px solid #46566f; margin-top: 16px; padding-top: 12px; }
+.dashboard-browser .filter-divider { grid-row: 1 / 4; }
+@media (max-width: 720px) {
+  .dashboard-actions { flex-wrap: wrap; }
+  .taxonomy-dialog { padding: 12px; width: calc(100vw - 20px); }
+  .taxonomy-row { gap: 6px; }
+  .taxonomy-row button { max-width: 125px; }
+  .bulk-toolbar { max-height: 210px; }
+  .dashboard-browser { height: 620px; }
 }

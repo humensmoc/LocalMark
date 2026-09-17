@@ -14,6 +14,7 @@ import {
 import { request } from "./protocol";
 import { Icon } from "./Icon";
 import { TagBrowser, type TagFilter } from "./TagBrowser";
+import { taxonomyToken } from "./taxonomy";
 import { PageTags } from "./PageTags";
 import { PageCategory } from "./PageCategory";
 import { PageComment, type CommentDraft } from "./PageComment";
@@ -39,6 +40,14 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
     [titleDrafts, setTitleDrafts] = useState(initial.titles),
     [toast, setToast] = useState("");
   const url = page?.url ?? "";
+  useEffect(() => {
+    if (!lib.taxonomy) return;
+    setFilter(old => {
+      const next = { category: lib.taxonomy!.categories.some(x => x.id === old.category) ? old.category : "",
+        tags: old.tags.filter(id => lib.taxonomy!.tags.some(x => x.id === id)) };
+      return JSON.stringify(next) === JSON.stringify(old) ? old : next;
+    });
+  }, [taxonomyToken(lib)]);
   const current = Object.values(lib.entries).find(
     (e) => e.page.url === url,
   )?.page;
@@ -274,7 +283,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
   for (const page of pages)
     for (const tag of new Set(page.tags))
       tagUsage.set(tag, (tagUsage.get(tag) ?? 0) + 1);
-  const allTags = [...tagUsage.keys()].sort(
+  const allTags = [...new Set([...(lib.taxonomy?.tags.map(x => x.name) ?? []), ...tagUsage.keys()])].sort(
     (a, b) => tagUsage.get(b)! - tagUsage.get(a)! || a.localeCompare(b, "zh"),
   );
   const categoryUsage = new Map<string, number>();
@@ -284,7 +293,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
       (categoryUsage.get(page.category) ?? 0) + 1,
     );
   const allCategories = [
-    ...new Set([...DEFAULT_CATEGORIES, ...categoryUsage.keys()]),
+    ...new Set([...(lib.taxonomy?.categories.map(x => x.name) ?? DEFAULT_CATEGORIES), ...categoryUsage.keys()]),
   ];
 
   return (
@@ -367,6 +376,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
           )}
           {tab === "tags" && (
             <TagBrowser
+              taxonomy={lib.taxonomy}
               pages={pages}
               categories={allCategories}
               tags={allTags}
@@ -434,7 +444,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                   counts={categoryUsage}
                   browse={(name) => {
                     setSearch("");
-                    setFilter({ category: name, tags: [] });
+                    setFilter({ category: lib.taxonomy?.categories.find(x => x.name === name)?.id ?? name, tags: [] });
                     setTab("tags");
                   }}
                   change={async (category) => {
@@ -444,6 +454,8 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                       title: page?.title ?? "",
                       favicon: page?.favicon ?? "",
                       category,
+                      categoryId: lib.taxonomy?.categories.find(x => x.name === category)?.id,
+                      expectedTaxonomy: taxonomyToken(lib),
                       expectedCategory: current?.category ?? DEFAULT_CATEGORY,
                     });
                     setLib(next);
@@ -457,7 +469,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                   counts={tagUsage}
                   browse={(t) => {
                     setSearch("");
-                    setFilter({ category: "", tags: [t] });
+                    setFilter({ category: "", tags: [lib.taxonomy?.tags.find(x => x.name === t)?.id ?? t] });
                     setTab("tags");
                   }}
                   change={async (tag, action) => {
@@ -467,6 +479,8 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                       title: page?.title ?? "",
                       favicon: page?.favicon ?? "",
                       tag,
+                      tagId: lib.taxonomy?.tags.find(x => x.name === tag)?.id,
+                      expectedTaxonomy: taxonomyToken(lib),
                       action,
                     });
                     setLib(next);

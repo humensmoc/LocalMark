@@ -145,7 +145,7 @@ it("acknowledges durable tags before disk writes and coalesces a burst", async (
   expect(writes).toHaveLength(0);
   await tick();
   await vi.waitFor(() => expect(saved().status).toBe("已保存到本地文件"));
-  expect(writes).toHaveLength(2);
+  expect(writes.filter(path => path !== "分类标签.json")).toHaveLength(2);
   expect(saved().status).toBe("已保存到本地文件");
 });
 

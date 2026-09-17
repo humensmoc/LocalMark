@@ -21,6 +21,7 @@ import type { PageInfo, PageAction } from "./page-bridge";
 declare const __LOCALMARK_VERSION__: string;
 type Draft = {
   anchor: Anchor;
+  text?: string;
   note: string;
   color: Color;
   id?: string;
@@ -194,6 +195,7 @@ function App() {
       setOverlaps(null);
       setDraft({
         anchor: a,
+        text: binding && binding.text !== binding.anchor.exact ? binding.text : undefined,
         note: binding?.note ?? "",
         color: binding?.color ?? snapshot.current.lib.lastColor,
         id: binding?.id,
@@ -288,6 +290,7 @@ function App() {
     setError("");
     setDraft({
       anchor: m.anchor,
+      text: m.text,
       note: m.note,
       color: m.color,
       id: m.id,
@@ -328,7 +331,7 @@ function App() {
           id: d.id,
           expectedUpdatedAt: d.expectedUpdatedAt,
           expectedMark: d.expectedMark,
-          text: d.anchor.exact,
+          text: d.text ?? d.anchor.exact,
           anchor: d.anchor,
           note: d.note,
           color: d.color,

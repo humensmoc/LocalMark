@@ -18,6 +18,9 @@ import { PageTitle, type TitleDraft } from "./PageTitle";
 import { SiteIcon } from "./SiteIcon";
 import { Icon } from "./Icon";
 import { useDashboardLayout } from "./DashboardLayout";
+import { TaxonomyManager } from "./TaxonomyManager";
+import { BulkToolbar } from "./BulkToolbar";
+import { taxonomyToken } from "./taxonomy";
 import "./ui.css";
 import "./dashboard.css";
 
@@ -32,6 +35,8 @@ function Dashboard() {
   const layout = useDashboardLayout();
   const [lib, setLib] = useState<Library>(emptyLibrary());
   const [selectedId, setSelectedId] = useState("");
+  const [checkedIds, setCheckedIds] = useState<string[]>([]);
+  const [managing, setManaging] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<TagFilter>({ category: "", tags: [] });
   const [error, setError] = useState("");
@@ -109,6 +114,15 @@ function Dashboard() {
   useEffect(() => {
     detail.current?.scrollTo(0, 0);
   }, [selectedId]);
+  useEffect(() => { setCheckedIds([]); }, [query, filter.category, JSON.stringify(filter.tags)]);
+  useEffect(() => {
+    if (!lib.taxonomy) return;
+    setFilter(old => {
+      const next = { category: lib.taxonomy!.categories.some(x => x.id === old.category) ? old.category : "",
+        tags: old.tags.filter(id => lib.taxonomy!.tags.some(x => x.id === id)) };
+      return JSON.stringify(next) === JSON.stringify(old) ? old : next;
+    });
+  }, [taxonomyToken(lib)]);
   const pages = Object.values(lib.entries)
     .map((e) => e.page)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -120,9 +134,9 @@ function Dashboard() {
       tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
   }
   const categories = [
-    ...new Set([...DEFAULT_CATEGORIES, ...categoryCounts.keys()]),
+    ...new Set([...(lib.taxonomy?.categories.map(x => x.name) ?? DEFAULT_CATEGORIES), ...categoryCounts.keys()]),
   ];
-  const tags = [...tagCounts.keys()].sort(
+  const tags = [...new Set([...(lib.taxonomy?.tags.map(x => x.name) ?? []), ...tagCounts.keys()])].sort(
     (a, b) => tagCounts.get(b)! - tagCounts.get(a)! || a.localeCompare(b),
   );
   const needle = query.trim().toLocaleLowerCase();
@@ -186,6 +200,7 @@ function Dashboard() {
           </button>
         </nav>
         <div className="dashboard-actions">
+          <button onClick={() => setManaging(true)}>分类与标签管理</button>
           <button disabled={loading} onClick={() => void refresh()}>
             <Icon name="refresh" size={16} />
             {loading ? "读取中…" : "刷新本地数据"}
@@ -221,6 +236,8 @@ function Dashboard() {
           {error}
         </p>
       )}
+      {lib.taxonomyIssue && <p className="error" role="alert">{lib.taxonomyIssue} <button onClick={() => setManaging(true)}>处理分类数据冲突</button></p>}
+      {managing && <TaxonomyManager lib={lib} mutate={mutate} close={() => setManaging(false)} />}
       <div
         id="articles-panel"
         role="tabpanel"
@@ -231,6 +248,11 @@ function Dashboard() {
       >
         <section className="dashboard-browser" aria-label="筛选与文章列表">
           <TagBrowser
+            taxonomy={lib.taxonomy}
+            selection={{ ids: checkedIds, toggle: id => setCheckedIds(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]) }}
+            selectionControls={<BulkToolbar key={JSON.stringify([query, filter])} lib={lib} selected={checkedIds}
+              visible={pages.filter(p => matches(p) && (!filter.category || p.categoryId === filter.category) && filter.tags.every(id => p.tagIds?.includes(id)))}
+              select={setCheckedIds} mutate={mutate} />}
             pages={pages}
             categories={categories}
             tags={tags}
@@ -328,13 +350,15 @@ function Dashboard() {
                   counts={categoryCounts}
                   browse={(category) => {
                     setQuery("");
-                    setFilter({ category, tags: [] });
+                    setFilter({ category: lib.taxonomy?.categories.find(x => x.name === category)?.id ?? category, tags: [] });
                   }}
                   change={(category) =>
                     mutate({
                       type: "page-category",
                       ...common,
                       category,
+                      categoryId: lib.taxonomy?.categories.find(x => x.name === category)?.id,
+                      expectedTaxonomy: taxonomyToken(lib),
                       expectedCategory: page.category,
                     })
                   }
@@ -346,10 +370,10 @@ function Dashboard() {
                   counts={tagCounts}
                   browse={(tag) => {
                     setQuery("");
-                    setFilter({ category: "", tags: [tag] });
+                    setFilter({ category: "", tags: [lib.taxonomy?.tags.find(x => x.name === tag)?.id ?? tag] });
                   }}
                   change={(tag, action) =>
-                    mutate({ type: "page-tag", ...common, tag, action })
+                    mutate({ type: "page-tag", ...common, tag, action, tagId: lib.taxonomy?.tags.find(x => x.name === tag)?.id, expectedTaxonomy: taxonomyToken(lib) })
                   }
                 />
                 <PageComment
@@ -397,14 +421,7 @@ function Dashboard() {
                         }
                         reset={() => resetMark(key)}
                         save={async (d) => {
-                          const anchor =
-                            d.text === d.base.text
-                              ? d.base.anchor
-                              : {
-                                  ...d.base.anchor,
-                                  exact: d.text,
-                                  end: d.base.anchor.start + d.text.length,
-                                };
+                          const anchor = d.base.anchor;
                           await mutate({
                             type: "save",
                             ...common,
@@ -527,7 +544,7 @@ function MarkEditor({
         </label>
         {d.text !== d.base.text && (
           <small className="excerpt-hint">
-            原网页中没有修改后的文字时，高亮将无法定位；可回原网页重新绑定。
+            仅修改摘录展示文字，原文定位保持不变。
           </small>
         )}
         <div className="row colors" role="group" aria-label="高亮颜色">

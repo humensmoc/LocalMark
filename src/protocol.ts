@@ -1,4 +1,5 @@
 import type { Anchor, Color, Library } from "./model";
+import type { BulkAction, TaxonomyAction } from "./taxonomy";
 export type Mutation = {
   id?: string;
   expectedUpdatedAt?: string;
@@ -9,6 +10,9 @@ export type Mutation = {
   anchor: Anchor;
 };
 export type Request =
+  | { type: "taxonomy"; action: TaxonomyAction; expected: string }
+  | { type: "bulk-taxonomy"; selected: Record<string, string>; action: BulkAction; expected: string }
+  | { type: "resolve-taxonomy"; choice: "local" | "disk" }
   | {
       type: "page-title";
       url: string;
@@ -23,6 +27,8 @@ export type Request =
       favicon: string;
       category: string;
       expectedCategory: string;
+      categoryId?: string;
+      expectedTaxonomy?: string;
     }
   | {
       type: "page-comment";
@@ -39,6 +45,8 @@ export type Request =
       favicon: string;
       tag: string;
       action: "add" | "remove";
+      tagId?: string;
+      expectedTaxonomy?: string;
     }
   | { type: "snapshot"; refresh?: boolean }
   | {

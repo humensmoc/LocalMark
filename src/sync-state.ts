@@ -2,7 +2,8 @@ import type { Library, Page } from "./model";
 
 // File-name migration belongs to the writer, not to the user's pending edit.
 const content = (page: Page) =>
-  JSON.stringify({ ...page, markdownFile: undefined });
+  JSON.stringify({ ...page, markdownFile: undefined,
+    ...(page.schemaVersion === 2 ? { category: undefined, tags: undefined } : {}) });
 
 /** Merge a writer's isolated snapshot without rolling back edits saved meanwhile. */
 export function mergeSyncResult(
@@ -10,6 +11,17 @@ export function mergeSyncResult(
   before: Library,
   synced: Library,
 ) {
+  const currentTaxonomy = JSON.stringify(latest.taxonomy),
+    oldTaxonomy = JSON.stringify(before.taxonomy),
+    resultTaxonomy = JSON.stringify(synced.taxonomy);
+  const taxonomyConflict = currentTaxonomy !== oldTaxonomy && resultTaxonomy !== oldTaxonomy && currentTaxonomy !== resultTaxonomy;
+  if (currentTaxonomy === oldTaxonomy || currentTaxonomy === resultTaxonomy) {
+    latest.taxonomy = structuredClone(synced.taxonomy);
+    latest.taxonomyDirty = synced.taxonomyDirty;
+  }
+  latest.taxonomyBase = taxonomyConflict ? before.taxonomyBase ?? null : synced.taxonomyBase;
+  latest.taxonomyIssue = taxonomyConflict ? "分类标签文件与浏览器同时修改，请在分类与标签管理中选择保留版本。" : synced.taxonomyIssue;
+  if (taxonomyConflict) latest.taxonomyDirty = true;
   for (const id of new Set([
     ...Object.keys(before.entries),
     ...Object.keys(synced.entries),
@@ -22,7 +34,9 @@ export function mergeSyncResult(
       continue;
     }
     if (!current) continue;
-    if (content(current.page) === content(original.page)) {
+    // A previous writer checkpoint may already have published this result.
+    // Reapplying that checkpoint is not a new concurrent user edit.
+    if (content(current.page) === content(original.page) || (result && content(current.page) === content(result.page))) {
       if (result) latest.entries[id] = structuredClone(result);
       else delete latest.entries[id];
       continue;

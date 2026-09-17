@@ -6,6 +6,7 @@ import {
   pageId,
   type Page,
 } from "../src/model";
+import { ensureTaxon, migrateTaxonomy, projectPage, TAXONOMY_PATH } from "../src/taxonomy";
 import { SyncEngine } from "../src/sync";
 import { mergeSyncResult } from "../src/sync-state";
 
@@ -37,6 +38,16 @@ export async function fixture(count = 1) {
     data.set(`原始数据/${id}.json`, baseJson);
     data.set(page.markdownFile!, baseMd);
   }
+  migrateTaxonomy(lib);
+  for (const name of ["设计", "local", "external", "new", "A", "B", "disk"]) ensureTaxon(lib, "tags", name);
+  for (const e of Object.values(lib.entries)) {
+    e.baseJson = JSON.stringify(e.page, null, 2) + "\n";
+    e.dirty = e.mdDirty = false;
+    data.set(`原始数据/${e.page.id}.json`, e.baseJson);
+  }
+  lib.taxonomyBase = JSON.stringify(lib.taxonomy, null, 2) + "\n";
+  lib.taxonomyDirty = false;
+  data.set(TAXONOMY_PATH, lib.taxonomyBase);
   const reads: string[] = [],
     writes: string[] = [];
   let lists = 0,
@@ -78,13 +89,20 @@ export async function fixture(count = 1) {
   };
 }
 
+function setTags(lib: ReturnType<typeof emptyLibrary>, id: string, names: string[]) {
+  const p = lib.entries[id].page;
+  p.tagIds = names.map(name => ensureTaxon(lib, "tags", name).id);
+  projectPage(lib, p);
+}
+
 describe("incremental sync", () => {
   it("does constant file work for a single tag in a 100-page library", async () => {
     const f = await fixture(100);
-    f.entry.page.tags = ["设计"];
+    setTags(f.lib, f.id, ["设计"]);
     f.entry.dirty = f.entry.mdDirty = true;
     await f.engine.run(new Set([f.id]));
     expect(f.reads).toEqual([
+      TAXONOMY_PATH,
       `原始数据/${f.id}.json`,
       `原始数据/${f.id}.json`,
       f.entry.page.markdownFile,
@@ -111,7 +129,7 @@ describe("incremental sync", () => {
       const other = Object.values(f.lib.entries)[1];
       other.issue = { kind: "invalid", message: "unrelated error" };
       f.lib.errors = [`${other.page.id}.json：unrelated error`];
-      f.entry.page.tags = ["local"];
+      setTags(f.lib, f.id, ["local"]);
       f.entry.dirty = f.entry.mdDirty = true;
       if (kind === "json")
         f.data.set(
@@ -132,7 +150,7 @@ describe("incremental sync", () => {
 
   it("retains the JSON checkpoint if Markdown writing fails, then retries", async () => {
     const f = await fixture();
-    f.entry.page.tags = ["new"];
+    setTags(f.lib, f.id, ["new"]);
     f.entry.dirty = f.entry.mdDirty = true;
     const write = f.files.write;
     f.files.write = async (path, value) => {
@@ -153,11 +171,11 @@ describe("incremental sync", () => {
 describe("concurrent save reconciliation", () => {
   it("keeps newer tags and the writer's disk bases across both checkpoints", async () => {
     const f = await fixture();
-    f.entry.page.tags = ["A"];
+    setTags(f.lib, f.id, ["A"]);
     f.entry.dirty = f.entry.mdDirty = true;
     const before = structuredClone(f.lib),
       latest = structuredClone(f.lib);
-    latest.entries[f.id].page.tags.push("B");
+    setTags(latest, f.id, ["A", "B"]);
     const engine = new SyncEngine(f.lib, f.files, async () => {
       mergeSyncResult(latest, before, f.lib);
       expect(latest.entries[f.id].page.tags).toEqual(["A", "B"]);
@@ -179,11 +197,11 @@ describe("concurrent save reconciliation", () => {
     const f = await fixture(),
       before = structuredClone(f.lib),
       latest = structuredClone(f.lib);
-    latest.entries[f.id].page.tags = ["local"];
+    setTags(latest, f.id, ["local"]);
     latest.entries[f.id].dirty = true;
     f.data.set(
       `原始数据/${f.id}.json`,
-      JSON.stringify({ ...f.entry.page, tags: ["disk"] }),
+      JSON.stringify({ ...f.entry.page, tags: ["disk"], tagIds: [f.lib.taxonomy!.tags.find(x => x.name === "disk")!.id] }),
     );
     await f.engine.run();
     mergeSyncResult(latest, before, f.lib);

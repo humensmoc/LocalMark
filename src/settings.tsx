@@ -243,11 +243,11 @@ function Settings() {
           <li>
             本地 JSON 修改后，重开网页、打开侧栏或点击“刷新本地数据”读回。保留
             ID、URL、folderName、markdownFile 与定位字段；批注修改 annotations
-            中的 note、color，网页标签修改顶层 tags。
+            中的 note、color。分类与标签请在仪表盘管理；v2 JSON 使用 categoryId、tagIds 关联根目录的分类标签.json，名称由该文件统一管理。
           </li>
         </ol>
         <pre>
-          {"摘录根目录/\n├── 网页标题.md\n└── 原始数据/\n    └── 网页ID.json"}
+          {"摘录根目录/\n├── 分类标签.json\n├── 网页标题.md\n└── 原始数据/\n    └── 网页ID.json"}
         </pre>
         <p className="tip">
           Markdown

@@ -140,7 +140,7 @@ describe("identity and export", () => {
     p.tags = [];
     expect(parseYaml(markdown(p).split("\n---\n")[0].slice(4)).tags).toEqual([]);
   });
-  it("upgrades compact exports with page comments on reconnect without changing JSON", async () => {
+  it("upgrades compact exports and migrates JSON while retaining content and identity", async () => {
     for (const modified of [false, true]) {
       const p = await fixture();
       p.comment = "整页评论";
@@ -152,7 +152,10 @@ describe("identity and export", () => {
       files.data.set(p.markdownFile, old);
       await new SyncEngine(lib, files, async () => {}).run();
       expect(files.data.get(p.markdownFile)).toBe(modified ? old : markdown(p));
-      expect(files.data.get(`原始数据/${p.id}.json`)).toBe(raw);
+      const migrated = JSON.parse(files.data.get(`原始数据/${p.id}.json`)!);
+      expect(migrated.schemaVersion).toBe(2);
+      expect(migrated.id).toBe(p.id);
+      expect(migrated.annotations).toEqual(p.annotations);
       expect(lib.entries[p.id].issue?.kind).toBe(modified ? "markdown" : undefined);
     }
   });
@@ -323,7 +326,7 @@ describe("identity and export", () => {
     expect(markdown(p)).not.toContain("<!-- annotation:");
     expect(markdown(p)).not.toContain(markId);
   });
-  it("rejects path traversal, mismatched IDs, duplicate IDs and inconsistent quotes", async () => {
+  it("rejects path traversal and mismatched IDs while allowing independent display quotes", async () => {
     const p = await fixture();
     await expect(
       parsePage(JSON.stringify({ ...p, folderName: "../evil" })),
@@ -339,8 +342,10 @@ describe("identity and export", () => {
         }),
       ),
     ).rejects.toThrow();
-    p.annotations[0].text = "wrong";
-    await expect(parsePage(JSON.stringify(p))).rejects.toThrow();
+    p.annotations[0].text = "编辑后的展示文字";
+    const edited = await parsePage(JSON.stringify(p));
+    expect(edited.annotations[0].anchor.exact).toBe("hello world");
+    expect(edited.annotations[0].text).toBe("编辑后的展示文字");
   });
 });
 describe("text anchors", () => {
@@ -419,7 +424,7 @@ describe("real-file synchronization contract", () => {
   it("writes one page JSON and one Markdown idempotently", async () => {
     const { engine, files, json, md, e } = await setup();
     await engine.run();
-    expect(files.data.size).toBe(2);
+    expect(files.data.size).toBe(3);
     expect(files.data.has(json)).toBe(true);
     expect(files.data.has(md)).toBe(true);
     expect(e.dirty).toBe(false);

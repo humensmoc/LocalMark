@@ -405,7 +405,7 @@ try {
   await detail
     .getByRole("textbox", { name: "高亮原文", exact: true })
     .fill("玩家需要及时的反馈。");
-  await detail.getByText(/原网页中没有修改后的文字时/).waitFor();
+  await detail.getByText(/原文定位保持不变/).waitFor();
   await detail.getByRole("button", { name: "保存高亮", exact: true }).click();
   await detail.getByRole("button", { name: "编辑高亮", exact: true }).waitFor();
   assert.equal(await detail.locator(".mark-editor textarea").count(), 0);
@@ -420,10 +420,11 @@ try {
   assert.equal(saved.category, "交互设计");
   assert.ok(saved.tags.includes("待复核") && !saved.tags.includes("成长系统"));
   assert.equal(saved.annotations[0].color, "blue", "edit mode persists the chosen highlight color");
-  assert.equal(saved.annotations[0].text, saved.annotations[0].anchor.exact);
+  assert.equal(saved.annotations[0].text, "玩家需要及时的反馈。");
+  assert.equal(saved.annotations[0].anchor.exact, "玩家需要清晰的目标和及时的反馈。");
   assert.equal(
     saved.annotations[0].anchor.end - saved.annotations[0].anchor.start,
-    saved.annotations[0].text.length,
+    saved.annotations[0].anchor.exact.length,
   );
   // The save reply now confirms IndexedDB durability; disk completion is separate.
   const syncDeadline = Date.now() + 10000;
@@ -567,7 +568,15 @@ try {
       await root.getDirectoryHandle("原始数据")
     ).getFileHandle(`${id}.json`);
     const p = JSON.parse(await (await handle.getFile()).text());
-    p.tags.push("AI新增标签");
+    const catalogHandle = await root.getFileHandle("分类标签.json");
+    const catalog = JSON.parse(await (await catalogHandle.getFile()).text());
+    const tag = { id: crypto.randomUUID(), name: "AI新增标签" };
+    catalog.tags.push(tag);
+    catalog.revision = crypto.randomUUID();
+    const catalogWriter = await catalogHandle.createWritable();
+    await catalogWriter.write(JSON.stringify(catalog, null, 2) + "\n");
+    await catalogWriter.close();
+    p.tagIds.push(tag.id);
     const writer = await handle.createWritable();
     await writer.write(JSON.stringify(p, null, 2) + "\n");
     await writer.close();

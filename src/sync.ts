@@ -8,6 +8,7 @@ import {
   parsePage,
 } from "./model";
 import type { Files } from "./files";
+import { initialTaxonomy, migrateTaxonomy, TAXONOMY_PATH, TaxonomySchema, touchTaxonomy } from "./taxonomy";
 const rawPath = (id: string) => `原始数据/${id}.json`;
 const mdPath = (e: Entry) =>
   e.page.markdownFile ?? `${e.page.folderName}/标注.md`;
@@ -19,6 +20,74 @@ export class SyncEngine {
     private files: Files,
     private persist: () => Promise<void>,
   ) {}
+  private async readTaxonomy() {
+    const raw = await this.files.read(TAXONOMY_PATH);
+    if (raw === null && this.lib.taxonomyBase != null)
+      throw Error("分类标签.json 已被移走，请恢复文件或选择冲突处理。");
+    if (raw !== null && raw !== this.lib.taxonomyBase) {
+      const disk = TaxonomySchema.parse(JSON.parse(raw));
+      if (this.lib.taxonomyBase !== undefined && this.lib.taxonomyDirty)
+        throw Error("分类标签.json 与浏览器同时修改，请选择保留版本。");
+      if (this.lib.taxonomyBase === undefined && this.lib.taxonomy) {
+        // First connection: map pending browser relationships by name, without
+        // resurrecting unused default categories deliberately removed on disk.
+        const local = this.lib.taxonomy;
+        let merged = false;
+        for (const kind of ["categories", "tags"] as const) {
+          for (const source of local[kind]) {
+            const used = Object.values(this.lib.entries).some(e => kind === "categories"
+              ? e.page.categoryId === source.id : e.page.tagIds?.includes(source.id));
+            if (!used && source.id.startsWith("category:")) continue;
+            const sameId = disk[kind].find(x => x.id === source.id);
+            const target = sameId ?? disk[kind].find(x => x.name === source.name);
+            if (!target) { disk[kind].push(source); merged = true; continue; }
+            for (const e of Object.values(this.lib.entries)) {
+              if (target.id === source.id) continue;
+              if (kind === "categories" && e.page.categoryId === source.id) {
+                e.page.categoryId = target.id; e.dirty = e.mdDirty = true;
+              }
+              if (kind === "tags" && e.page.tagIds?.includes(source.id)) {
+                e.page.tagIds = [...new Set(e.page.tagIds.map(id => id === source.id ? target.id : id))];
+                e.dirty = e.mdDirty = true;
+              }
+            }
+          }
+        }
+        this.lib.taxonomy = disk;
+        this.lib.taxonomyDirty = merged;
+        if (merged) touchTaxonomy(this.lib);
+      } else {
+        this.lib.taxonomy = disk;
+        this.lib.taxonomyDirty = false;
+      }
+    }
+    if (!this.lib.taxonomy) { this.lib.taxonomy = initialTaxonomy(); this.lib.taxonomyDirty = true; }
+    this.lib.taxonomyBase = raw;
+    delete this.lib.taxonomyIssue;
+  }
+  private async writeTaxonomy() {
+    if (!this.lib.taxonomyDirty) return;
+    const raw = await this.files.read(TAXONOMY_PATH);
+    if (raw !== this.lib.taxonomyBase) throw Error("分类标签.json 在写入前改变，已暂停覆盖。");
+    const value = JSON.stringify(TaxonomySchema.parse(this.lib.taxonomy), null, 2) + "\n";
+    await this.files.write(TAXONOMY_PATH, value);
+    this.lib.taxonomyBase = value;
+    this.lib.taxonomyDirty = false;
+    await this.persist();
+  }
+  async resolveTaxonomy(choice: "local" | "disk") {
+    if (!this.lib.taxonomyIssue) throw Error("分类数据冲突已处理，请刷新。");
+    const raw = await this.files.read(TAXONOMY_PATH);
+    const disk = choice === "disk" ? TaxonomySchema.parse(JSON.parse(raw ?? "null")) : undefined;
+    const backup = choice === "disk" ? JSON.stringify(this.lib.taxonomy, null, 2) : raw;
+    if (backup) await this.files.write(`冲突备份/分类标签-${Date.now()}-${crypto.randomUUID()}.json`, backup);
+    this.lib.taxonomyBase = raw;
+    if (disk) this.lib.taxonomy = disk;
+    this.lib.taxonomyDirty = !disk;
+    delete this.lib.taxonomyIssue;
+    await this.persist();
+    return this.run();
+  }
   private async refresh(ids?: ReadonlySet<string>) {
     const names = ids ? [...ids].map((id) => `${id}.json`) : await this.files.listJson();
     this.lib.errors = ids
@@ -104,7 +173,24 @@ export class SyncEngine {
         };
   }
   async run(ids?: ReadonlySet<string>) {
+    const taxonomyBefore = JSON.stringify(this.lib.taxonomy);
+    try { await this.readTaxonomy(); }
+    catch (error) {
+      this.lib.taxonomyIssue = String(error);
+      this.lib.status = "分类数据需要处理；已暂停文件同步";
+      await this.persist();
+      return;
+    }
+    if (taxonomyBefore !== JSON.stringify(this.lib.taxonomy)) ids = undefined;
     await this.refresh(ids);
+    migrateTaxonomy(this.lib);
+    try { await this.writeTaxonomy(); }
+    catch (error) {
+      this.lib.taxonomyIssue = String(error);
+      this.lib.status = "分类数据未同步；已暂停网页写入";
+      await this.persist();
+      return;
+    }
     for (const [id, e] of Object.entries(this.lib.entries)) {
       if (ids && !ids.has(id)) continue;
       if (e.issue && e.issue.kind !== "io" && e.issue.kind !== "markdown")

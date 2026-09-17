@@ -1,13 +1,14 @@
 {
   "name": "local-web-clipper",
-  "version": "0.1.23",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && node scripts/build.mjs",
     "test": "vitest run",
     "test:browser": "node tests/native-sidepanel-browser.mjs",
-    "test:dashboard": "node tests/dashboard-browser.mjs"
+    "test:dashboard": "node tests/dashboard-browser.mjs",
+    "test:taxonomy": "node tests/taxonomy-browser.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

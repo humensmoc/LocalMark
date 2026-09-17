@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Mark, Page } from "./model";
+import type { Mark, Page, Taxonomy } from "./model";
 import { SiteIcon } from "./SiteIcon";
 
 export type TagFilter = { category: string; tags: string[] };
@@ -23,6 +23,9 @@ export function TagBrowser({
   selectedId,
   wholeCard = false,
   filterDivider,
+  taxonomy,
+  selection,
+  selectionControls,
 }: {
   pages: Page[];
   categories: string[];
@@ -36,13 +39,20 @@ export function TagBrowser({
   selectedId?: string;
   wholeCard?: boolean;
   filterDivider?: ReactNode;
+  taxonomy?: Taxonomy;
+  selection?: { ids: string[]; toggle: (id: string) => void };
+  selectionControls?: ReactNode;
 }) {
+  const categoryId = (p: Page) => taxonomy ? p.categoryId : p.category;
+  const tagIds = (p: Page) => taxonomy ? p.tagIds ?? [] : p.tags;
+  const categoryName = (id: string) => taxonomy?.categories.find(x => x.id === id)?.name ?? id;
+  const tagName = (id: string) => taxonomy?.tags.find(x => x.id === id)?.name ?? id;
   const resultsRef = useRef<HTMLDivElement>(null);
   const searched = pages.filter((p) => matches(p));
   const results = searched.filter(
     (p) =>
-      (!filter.category || p.category === filter.category) &&
-      filter.tags.every((t) => p.tags.includes(t)),
+      (!filter.category || categoryId(p) === filter.category) &&
+      filter.tags.every((t) => tagIds(p).includes(t)),
   );
   const selectionKey = JSON.stringify(filter);
   useEffect(() => {
@@ -58,24 +68,24 @@ export function TagBrowser({
     });
   const categoryNames = [
     ...new Set([
-      ...categories.filter((name) => pages.some((p) => p.category === name)),
+      ...(taxonomy ? taxonomy.categories.map(x => x.id) : categories).filter((name) => pages.some((p) => categoryId(p) === name)),
       ...(filter.category ? [filter.category] : []),
     ]),
   ];
-  const tagNames = [...new Set([...tags, ...filter.tags])];
+  const tagNames = [...new Set([...(taxonomy ? taxonomy.tags.map(x => x.id) : tags), ...filter.tags])];
   const categoryOptions = categoryNames
     .map((name) => ({
       name,
       count: searched.filter(
         (p) =>
-          p.category === name && filter.tags.every((t) => p.tags.includes(t)),
+          categoryId(p) === name && filter.tags.every((t) => tagIds(p).includes(t)),
       ).length,
     }))
     .filter((option) => option.count > 0);
   const tagOptions = tagNames
     .map((name) => ({
       name,
-      count: results.filter((p) => p.tags.includes(name)).length,
+      count: results.filter((p) => tagIds(p).includes(name)).length,
     }))
     .filter((option) => option.count > 0);
   return (
@@ -114,7 +124,7 @@ export function TagBrowser({
                   })
                 }
               >
-                <span>{name}</span>
+                <span>{categoryName(name)}</span>
                 <small>{count}</small>
               </button>
             ))}
@@ -130,7 +140,7 @@ export function TagBrowser({
                 aria-pressed={filter.tags.includes(tag)}
                 onClick={() => toggleTag(tag)}
               >
-                <span>{tag}</span>
+                <span>{tagName(tag)}</span>
                 <small>{count}</small>
               </button>
             ))}
@@ -145,6 +155,7 @@ export function TagBrowser({
         </div>
       </section>
       {filterDivider}
+      {selectionControls}
       <div className="result-heading">
         <b role="status">{results.length} 个网页</b>
         <small>最近修改优先</small>
@@ -175,6 +186,10 @@ export function TagBrowser({
               open(p);
             } : undefined}
           >
+            {selection && <label className="article-checkbox" onClick={e => e.stopPropagation()}>
+              <input type="checkbox" aria-label={`选择文章：${p.title}`} checked={selection.ids.includes(p.id)} onChange={() => selection.toggle(p.id)} />
+              选择
+            </label>}
             <SiteIcon site={p} backdrop />
             <div className="site-heading">
             <SiteIcon site={p} />
@@ -192,7 +207,7 @@ export function TagBrowser({
               {p.tags.map((t) => (
                 <span
                   className={
-                    filter.tags.includes(t)
+                    filter.tags.includes(taxonomy ? taxonomy.tags.find(x => x.name === t)?.id ?? t : t)
                       ? "result-tag selected"
                       : "result-tag"
                   }

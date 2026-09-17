@@ -1,3 +1,4 @@
+import { ensureTaxon } from "../src/taxonomy";
 import { describe, expect, it } from "vitest";
 import { DirectoryFiles } from "../src/files";
 import { emptyLibrary, folderName, markdownFileName, pageId, previousMarkdown, type Page } from "../src/model";
@@ -78,15 +79,15 @@ describe("invisible title characters and native directory sync", () => {
     expect(lib.entries[id].issue).toBeUndefined();
     expect(page.markdownFile).toBe("《喵呜岛》BUG 反馈表 - 飞书云文档.md");
     for (const tags of [["交互设计"], ["交互设计", "开发复盘"], []]) {
-      page.tags = tags;
-      page.category = "游戏设计";
+      page.tagIds = tags.map(name => ensureTaxon(lib, "tags", name).id);
+      page.categoryId = ensureTaxon(lib, "categories", "游戏设计").id;
       lib.entries[id].dirty = lib.entries[id].mdDirty = true;
       await engine.run(new Set([id]));
       expect(lib.status).toBe("已保存到本地文件");
       expect(JSON.parse(data.get(`原始数据/${id}.json`)!).tags).toEqual(tags);
       expect(data.get(page.markdownFile!)).toContain('category: "游戏设计"');
     }
-    expect([...data.keys()]).toHaveLength(2);
+    expect([...data.keys()]).toHaveLength(3);
   });
 
   it.each([false, true])("preserves an existing legacy directory and manual-edit checks (manual=%s)", async (manual) => {

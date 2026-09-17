@@ -17,6 +17,7 @@ import { DirectoryFiles } from "./files";
 import { SyncEngine } from "./sync";
 import { mergeSyncResult } from "./sync-state";
 import type { Request } from "./protocol";
+import { migrateTaxonomy, manageTaxonomy, bulkTaxonomy, ensureTaxon, projectPage, taxonomyToken } from "./taxonomy";
 let queue: Promise<unknown> = Promise.resolve();
 const serial = <T>(fn: () => Promise<T>): Promise<T> => {
   const next = queue.then(fn, fn);
@@ -25,6 +26,7 @@ const serial = <T>(fn: () => Promise<T>): Promise<T> => {
 };
 async function library() {
   const lib = (await db.get<Library>("library")) ?? emptyLibrary();
+  const beforeMigration = JSON.stringify(lib);
   let changed = false;
   for (const e of Object.values(lib.entries)) {
     if (!Array.isArray(e.page.tags) || e.page.category === undefined) {
@@ -33,7 +35,8 @@ async function library() {
       changed = true;
     }
   }
-  if (changed) await db.set("library", lib);
+  migrateTaxonomy(lib);
+  if (changed || JSON.stringify(lib) !== beforeMigration) await db.set("library", lib);
   return lib;
 }
 // Files are serialized separately: a slow disk must not hold the browser-save queue.
@@ -43,7 +46,7 @@ const serialFiles = <T>(fn: () => Promise<T>): Promise<T> => {
   fileQueue = next.catch(() => {});
   return next;
 };
-async function sync(ids?: ReadonlySet<string>, resolution?: { pageId: string; choice: "local" | "disk" }) {
+async function sync(ids?: ReadonlySet<string>, resolution?: { pageId?: string; choice: "local" | "disk" }) {
   const before = await serial(library);
   const lib = structuredClone(before);
   const persist = () => serial(async () => {
@@ -67,7 +70,10 @@ async function sync(ids?: ReadonlySet<string>, resolution?: { pageId: string; ch
       return;
     }
     const engine = new SyncEngine(lib, new DirectoryFiles(root), persist);
-    if (resolution) await engine.resolve(resolution.pageId, resolution.choice);
+    if (resolution) {
+      if (resolution.pageId) await engine.resolve(resolution.pageId, resolution.choice);
+      else await engine.resolveTaxonomy(resolution.choice);
+    }
     else await engine.run(ids);
   } catch (e) {
     if (resolution) throw e;
@@ -86,7 +92,7 @@ async function notify() {
 const pendingPages = new Set<string>();
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
 let flushQueued = false;
-function scheduleSync(id: string) {
+function scheduleSync(id = "") {
   pendingPages.add(id);
   if (flushTimer || flushQueued) return;
   // Combine a short burst into one writer job. Durable dirty flags survive worker exit.
@@ -94,7 +100,7 @@ function scheduleSync(id: string) {
     flushTimer = undefined;
     flushQueued = true;
     void serialFiles(async () => {
-      const ids = new Set(pendingPages);
+      const ids = new Set([...pendingPages].filter(Boolean));
       pendingPages.clear();
       try {
         await sync(ids);
@@ -102,7 +108,7 @@ function scheduleSync(id: string) {
       } finally {
         flushQueued = false;
         const next = pendingPages.values().next().value;
-        if (next) scheduleSync(next);
+        if (pendingPages.size) scheduleSync(next);
       }
     }).catch(() => {});
   }, 75);
@@ -137,6 +143,19 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
   }
   const lib = await library();
   if (m.type === "snapshot") return lib;
+  if (m.type === "taxonomy" || m.type === "bulk-taxonomy") {
+    if (sender.url !== chrome.runtime.getURL("dashboard.html")) throw Error("请在仪表盘管理分类和标签。");
+    const next = structuredClone(lib);
+    const changed = m.type === "taxonomy"
+      ? manageTaxonomy(next, m.action, m.expected)
+      : bulkTaxonomy(next, m.selected, m.action, m.expected);
+    next.status = `已修改 ${changed.length} 篇网页；已暂存浏览器，等待文件同步`;
+    await db.set("library", next);
+    for (const id of changed) scheduleSync(id);
+    scheduleSync();
+    void notify().catch(() => {});
+    return next;
+  }
   if (m.type === "directory-connected") {
     if (!sender.url?.startsWith(chrome.runtime.getURL("")))
       throw Error("只能从插件设置连接目录");
@@ -144,6 +163,9 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
       old = await db.get<FileSystemDirectoryHandle>("root");
     if (!next) throw Error("请重新选择文件夹");
     if (old && !(await next.isSameEntry(old))) {
+      delete lib.taxonomyBase;
+      delete lib.taxonomyIssue;
+      lib.taxonomyDirty = true;
       for (const e of Object.values(lib.entries)) {
         e.baseJson = null;
         e.baseMd = null;
@@ -163,7 +185,7 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
     if (!/^https?:\/\//.test(url)) throw Error("仅支持 HTTP/HTTPS 网页");
     if (!dashboard && sender.tab?.url && canonicalUrl(sender.tab.url) !== url)
       throw Error("网页已切换，请重新选择文字");
-    const id = await pageId(url),
+    const id = Object.values(lib.entries).find(e => e.page.url === url)?.page.id ?? await pageId(url),
       now = new Date().toISOString();
     changedId = id;
     let e = lib.entries[id];
@@ -199,14 +221,21 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
         mdDirty: true,
       };
     }
+    migrateTaxonomy(lib);
     if (m.type === "page-title") {
       e.page.title = m.title.trim();
       e.page.updatedAt = now;
       e.dirty = e.mdDirty = true;
     } else if (m.type === "page-category") {
+      if (lib.taxonomyIssue) throw Error(lib.taxonomyIssue);
+      if (m.expectedTaxonomy && m.expectedTaxonomy !== taxonomyToken(lib)) throw Error("分类已改变，请刷新后重试。");
       if (e.page.category !== m.expectedCategory)
         throw Error("主分类已在其他标签页或文件中修改，请刷新后重新选择。");
-      e.page.category = PageCategorySchema.parse(m.category);
+      const name = PageCategorySchema.parse(m.category);
+      const category = m.categoryId ? lib.taxonomy!.categories.find(x => x.id === m.categoryId) : ensureTaxon(lib, "categories", name);
+      if (!category) throw Error("主分类已不存在。");
+      e.page.categoryId = category.id;
+      projectPage(lib, e.page);
       e.page.updatedAt = now;
       e.dirty = e.mdDirty = true;
     } else if (m.type === "page-comment") {
@@ -216,12 +245,15 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
       e.page.updatedAt = now;
       e.dirty = e.mdDirty = true;
     } else if (m.type === "page-tag") {
+      if (lib.taxonomyIssue) throw Error(lib.taxonomyIssue);
+      if (m.expectedTaxonomy && m.expectedTaxonomy !== taxonomyToken(lib)) throw Error("标签已改变，请刷新后重试。");
       const [tag] = PageTagsSchema.parse([m.tag]);
-      e.page.tags = PageTagsSchema.parse(
-        m.action === "add"
-          ? [...new Set([...e.page.tags, tag])]
-          : e.page.tags.filter((t) => t !== tag),
-      );
+      const target = m.tagId ? lib.taxonomy!.tags.find(x => x.id === m.tagId)
+        : m.action === "add" ? ensureTaxon(lib, "tags", tag) : lib.taxonomy!.tags.find(x => x.name === tag);
+      if (!target) throw Error("标签已不存在。");
+      e.page.tagIds = m.action === "add" ? [...new Set([...e.page.tagIds!, target.id])] : e.page.tagIds!.filter(id => id !== target.id);
+      if (e.page.tagIds.length > 500) throw Error("每篇网页最多允许 500 个标签。");
+      projectPage(lib, e.page);
       e.page.updatedAt = now;
       e.dirty = e.mdDirty = true;
     } else {
@@ -282,11 +314,20 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
 }
 async function dispatch(m: Request, sender: chrome.runtime.MessageSender) {
   if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
+  if (["taxonomy", "bulk-taxonomy", "resolve-taxonomy"].includes(m.type) && sender.url !== chrome.runtime.getURL("dashboard.html"))
+    throw Error("请在仪表盘管理分类和标签。");
+  if (m.type === "taxonomy" || m.type === "bulk-taxonomy") {
+    return serialFiles(async () => {
+      await sync();
+      return serial(() => handle(m, sender));
+    });
+  }
   if (m.type === "directory-connected" || m.type === "resolve" ||
+      m.type === "resolve-taxonomy" ||
       (m.type === "snapshot" && m.refresh)) {
     return serialFiles(async () => {
       if (m.type === "directory-connected") await serial(() => handle(m, sender));
-      await sync(undefined, m.type === "resolve" ? m : undefined);
+      await sync(undefined, m.type === "resolve" || m.type === "resolve-taxonomy" ? m : undefined);
       await notify();
       return serial(library);
     });
@@ -328,7 +369,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       const ids = new Set(Object.entries(lib.entries)
         .filter(([, e]) => e.dirty || e.mdDirty || e.issue?.kind === "io")
         .map(([id]) => id));
-      if (ids.size) {
+      if (ids.size || lib.taxonomyDirty || lib.taxonomyIssue) {
         await sync(ids);
         await notify();
       }

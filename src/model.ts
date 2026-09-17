@@ -37,10 +37,10 @@ export const MarkSchema = z
     createdAt: timestamp,
     updatedAt: timestamp,
   })
-  .refine((m) => m.text === m.anchor.exact, "摘录必须与 anchor.exact 相同");
+  ; // Display text can change without changing the original source anchor.
 export const PageSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.union([z.literal(1), z.literal(2)]),
     id: z.string().regex(/^[a-f0-9]{16}$/),
     url: z
       .string()
@@ -67,6 +67,8 @@ export const PageSchema = z
     updatedAt: timestamp,
     annotations: z.array(MarkSchema).max(10000),
     tags: PageTagsSchema.optional(),
+    tagIds: z.array(z.string().min(1)).max(500).optional(),
+    categoryId: z.string().min(1).optional(),
     comment: PageCommentSchema.optional(),
     category: PageCategorySchema.default(DEFAULT_CATEGORY),
     markdownFile: z
@@ -81,6 +83,7 @@ export const PageSchema = z
       )
       .optional(),
   })
+  .refine(p => p.schemaVersion === 1 || (!!p.categoryId && Array.isArray(p.tagIds) && new Set(p.tagIds).size === p.tagIds.length), "v2 网页必须包含有效的分类 ID 和不重复的标签 ID")
   .refine(
     (p) =>
       new Set(p.annotations.map((a) => a.id)).size === p.annotations.length,
@@ -109,12 +112,18 @@ export type Entry = {
   legacyMdBase?: string | null;
 };
 export type Library = {
+  taxonomy?: Taxonomy;
+  taxonomyBase?: string | null;
+  taxonomyDirty?: boolean;
+  taxonomyIssue?: string;
   entries: Record<string, Entry>;
   lastColor: Color;
   status: string;
   errors: string[];
   directoryName?: string;
 };
+export type Taxon = { id: string; name: string };
+export type Taxonomy = { version: 1; revision: string; categories: Taxon[]; tags: Taxon[] };
 export const emptyLibrary = (): Library => ({
   entries: {},
   lastColor: "yellow",
@@ -271,7 +280,7 @@ export async function parsePage(raw: string, expectedId?: string) {
   if (raw.length > 16_000_000) throw Error("JSON 文件过大");
   const p = PageSchema.parse(JSON.parse(raw));
   if (
-    p.id !== (await pageId(p.url)) ||
+    (p.schemaVersion === 1 && p.id !== (await pageId(p.url))) ||
     canonicalUrl(p.url) !== p.url ||
     (expectedId && p.id !== expectedId) ||
     !p.folderName.endsWith("--" + p.id)
