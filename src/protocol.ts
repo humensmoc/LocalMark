@@ -10,6 +10,13 @@ export type Mutation = {
 };
 export type Request =
   | {
+      type: "page-title";
+      url: string;
+      title: string;
+      favicon: string;
+      expectedTitle: string | null;
+    }
+  | {
       type: "page-category";
       url: string;
       title: string;

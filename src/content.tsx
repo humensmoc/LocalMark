@@ -2,8 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   COLORS,
-  DEFAULT_CATEGORY,
-  DEFAULT_CATEGORIES,
   canonicalUrl,
   emptyLibrary,
   textLink,
@@ -17,11 +15,10 @@ import { capture, HOST, Painter } from "./anchors";
 import { request } from "./protocol";
 import { Icon } from "./Icon";
 import { Floating } from "./Floating";
-import { TagBrowser, type TagFilter } from "./TagBrowser";
-import { PageTags } from "./PageTags";
-import { PageCategory } from "./PageCategory";
-import { PageComment, type CommentDraft } from "./PageComment";
 import style from "./ui.css?inline";
+import type { PageInfo, PageAction } from "./page-bridge";
+// Embed this content script's build version, even if the extension is later reloaded.
+declare const __LOCALMARK_VERSION__: string;
 type Draft = {
   anchor: Anchor;
   note: string;
@@ -42,11 +39,6 @@ const instance = {
 };
 function App() {
   const [lib, setLib] = useState<Library>(emptyLibrary()),
-    [open, setOpen] = useState(false),
-    [tab, setTab] = useState<"recent" | "tags" | "current">("current"),
-    [search, setSearch] = useState(""),
-    [commentDrafts, setCommentDrafts] = useState<Record<string, CommentDraft>>({}),
-    [filter, setFilter] = useState<TagFilter>({ category: "", tags: [] }),
     [url, setUrl] = useState(canonicalUrl(location.href)),
     [draft, setDraft] = useState<Draft | null>(null),
     [hover, setHover] = useState<{
@@ -70,6 +62,7 @@ function App() {
   const snapshot = useRef({ lib, current, draft, rebind, url });
   snapshot.current = { lib, current, draft, rebind, url };
   const refreshGeneration = useRef(0),
+    quickRef = useRef<HTMLDivElement>(null),
     toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     expandTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -87,17 +80,14 @@ function App() {
       tell(String(e));
     }
   }
-  async function openSettings() {
-    try {
-      await request({ type: "settings" });
-    } catch (e) {
-      tell(
-        `无法打开设置：${e instanceof Error ? e.message : String(e)}。请右键浏览器工具栏中的插件图标，选择“选项”；更新插件后请刷新当前网页。`,
-      );
-    }
-  }
+  const pageInfo = (): PageInfo => ({ ready: true, url: canonicalUrl(location.href), title: document.title,
+    favicon: document.querySelector<HTMLLinkElement>('link[rel~="icon"]')?.href ?? "",
+    version: __LOCALMARK_VERSION__, located: [...painter.ranges.keys()] });
+  const publish = () => { void chrome.runtime.sendMessage({ type: "page-updated", page: pageInfo() }).catch(() => {}); };
   useEffect(() => {
-    setDraft(null);
+    // A selection can arrive before the SPA URL poll. Keep a draft captured on
+    // the new URL while discarding only drafts belonging to the previous page.
+    setDraft((active) => active?.url === url ? active : null);
     setRebind(null);
     setHover(null);
     setOverlaps(null);
@@ -106,17 +96,25 @@ function App() {
   }, [url]);
   useEffect(() => {
     const onMessage = (
-      m: { type: string },
-      _sender: chrome.runtime.MessageSender,
+      m: { type: string } | PageAction,
+      sender: chrome.runtime.MessageSender,
       reply: (value: unknown) => void,
     ) => {
+      if (sender.id !== chrome.runtime.id) return;
       if (m.type === "changed") void load();
-      if (m.type === "toggle" || m.type === "show") {
-        setOpen((v) => m.type === "show" || !v);
-        void load(true);
+      if (m.type === "ping") {
+        setUrl(canonicalUrl(location.href));
+        reply(pageInfo());
       }
-      if (["ping", "toggle", "show", "changed"].includes(m.type))
-        reply({ ready: true });
+      if (m.type === "page-action" && "action" in m) {
+        if (m.url !== canonicalUrl(location.href)) { reply({ ok: false, error: "页面已切换，请稍后重试。" }); return; }
+        const mark = snapshot.current.current?.annotations.find(a => a.id === m.id);
+        if (!mark) { reply({ ok: false, error: "标注已改变，请刷新侧栏后重试。" }); return; }
+        if (m.action === "jump" && !painter.jump(mark.id)) { reply({ ok: false, error: "暂未找到原文，请使用重新绑定。" }); return; }
+        if (m.action === "edit") edit(mark);
+        if (m.action === "rebind") { setRebind(mark); setDraft(null); }
+        reply({ ok: true });
+      }
     };
     chrome.runtime.onMessage.addListener(onMessage);
     let paintTimer: ReturnType<typeof setTimeout>;
@@ -126,6 +124,7 @@ function App() {
       paintTimer = setTimeout(() => {
         painter.paint(snapshot.current.current?.annotations ?? []);
         setGeometry((v) => v + 1);
+        publish();
       }, 250);
     };
     const observer = new MutationObserver((records) => {
@@ -153,6 +152,7 @@ function App() {
       if (next !== lastUrl) {
         lastUrl = next;
         setUrl(next);
+        publish();
       }
     }, 500);
     let frame = 0;
@@ -186,7 +186,9 @@ function App() {
       if (r.commonAncestorContainer.parentElement?.closest("#" + HOST)) return;
       const a = capture(r);
       if (!a) return;
-      const binding = snapshot.current.rebind;
+      const selectionUrl = canonicalUrl(location.href);
+      const binding = snapshot.current.url === selectionUrl ? snapshot.current.rebind : null;
+      setUrl(selectionUrl);
       setError("");
       setHover(null);
       setOverlaps(null);
@@ -200,7 +202,7 @@ function App() {
         x: e.clientX + 8,
         y: e.clientY + 8,
         expanded: !!binding,
-        url: snapshot.current.url,
+        url: selectionUrl,
       });
     };
     const move = (e: MouseEvent) => {
@@ -245,28 +247,6 @@ function App() {
       setHover(null);
     };
     const key = (e: KeyboardEvent) => {
-      if (
-        e.ctrlKey &&
-        !e.altKey &&
-        !e.metaKey &&
-        !e.shiftKey &&
-        e.key.toLowerCase() === "b" &&
-        !e.isComposing
-      ) {
-        const focus = instance.shadow?.activeElement ?? document.activeElement;
-        if (
-          focus instanceof HTMLElement &&
-          (focus.matches("input,textarea,select") || focus.isContentEditable)
-        )
-          return;
-        e.preventDefault();
-        e.stopPropagation();
-        if (!e.repeat) {
-          setOpen((v) => !v);
-          void load(true);
-        }
-        return;
-      }
       if (e.key === "Escape") {
         setDraft(null);
         setHover(null);
@@ -301,6 +281,7 @@ function App() {
   }, []);
   useEffect(() => {
     painter.paint(current?.annotations ?? []);
+    publish();
     setGeometry((v) => v + 1);
   }, [current]);
   const edit = (m: Mark, x = innerWidth / 2 - 160, y = 100) => {
@@ -315,7 +296,7 @@ function App() {
       x,
       y,
       expanded: true,
-      url,
+      url: snapshot.current.url,
     });
     setOverlaps(null);
     setHover(null);
@@ -354,7 +335,7 @@ function App() {
         },
       });
       setLib(next);
-      setDraft(null);
+      setDraft((active) => active === d ? null : active);
       setRebind(null);
       getSelection()?.removeAllRanges();
       tell(next.status);
@@ -362,9 +343,7 @@ function App() {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
       if (!d.expanded) tell(message);
-      setDraft((current) =>
-        current ? { ...current, expanded: true } : current,
-      );
+      setDraft((current) => current === d ? { ...d, expanded: true } : current);
     } finally {
       setBusy(false);
     }
@@ -385,26 +364,6 @@ function App() {
       tell(String(e));
     }
   }
-  async function copy(p: Page, m: Mark) {
-    const text = textLink(p, m.anchor);
-    try {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const input = document.createElement("textarea");
-        input.value = text;
-        input.style.cssText = "position:fixed;left:-10000px;top:0";
-        document.body.append(input);
-        input.select();
-        const ok = document.execCommand("copy");
-        input.remove();
-        if (!ok) throw Error("copy failed");
-      }
-      tell("已复制原文高亮链接（不包含批注）");
-    } catch {
-      tell("无法访问剪贴板，请允许此网页的剪贴板权限。");
-    }
-  }
   function jump(p: Page, m: Mark) {
     if (p.url !== url) {
       void request({ type: "open", url: textLink(p, m.anchor) }).catch((e) =>
@@ -415,310 +374,11 @@ function App() {
     if (!painter.jump(m.id))
       tell("暂未找到原文。可点击“重新绑定”后选择对应文字。");
   }
-  const pages = Object.values(lib.entries)
-    .map((e) => e.page)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const query = search.trim().toLocaleLowerCase();
-  const matches = (p: Page, m?: Mark) =>
-    [
-      p.title,
-      p.url,
-      p.comment ?? "",
-      p.category,
-      ...p.tags,
-      ...(m
-        ? [m.text, m.note]
-        : p.annotations.flatMap((a) => [a.text, a.note])),
-    ]
-      .join(" ")
-      .toLocaleLowerCase()
-      .includes(query);
-  const card = (p: Page, m: Mark) => (
-    <article
-      key={m.id}
-      className="card current"
-      style={{ "--mark": COLORS[m.color].hex } as React.CSSProperties}
-    >
-      {p.url !== url && (
-        <button className="title muted" onClick={() => jump(p, m)}>
-          {p.title}
-        </button>
-      )}
-      <div
-        className="quote"
-        tabIndex={0}
-        role="button"
-        onClick={() => jump(p, m)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") jump(p, m);
-        }}
-      >
-        {m.text}
-      </div>
-      {m.note && <div className="note">{m.note}</div>}
-      <div className="row tools wrap">
-        <button title="复制定位链接" onClick={() => void copy(p, m)}>
-          <Icon name="link" size={14} />
-          链接
-        </button>
-        {p.url === url && (
-          <>
-            <button onClick={() => edit(m)}>
-              <Icon name="pen" size={14} />
-              编辑
-            </button>
-            {!painter.ranges.has(m.id) && (
-              <button
-                className="danger"
-                onClick={() => {
-                  setRebind(m);
-                  setDraft(null);
-                }}
-              >
-                未定位 · 重新绑定
-              </button>
-            )}
-          </>
-        )}
-        <button title="删除标注" onClick={() => void remove(p, m)}>
-          <Icon name="trash" size={14} />
-        </button>
-      </div>
-    </article>
-  );
-  const tagUsage = new Map<string, number>();
-  for (const page of pages)
-    for (const tag of new Set(page.tags))
-      tagUsage.set(tag, (tagUsage.get(tag) ?? 0) + 1);
-  const allTags = [...tagUsage.keys()].sort(
-    (a, b) => tagUsage.get(b)! - tagUsage.get(a)! || a.localeCompare(b, "zh"),
-  );
-  const categoryUsage = new Map<string, number>();
-  for (const page of pages)
-    categoryUsage.set(page.category, (categoryUsage.get(page.category) ?? 0) + 1);
-  const allCategories = [...new Set([...DEFAULT_CATEGORIES, ...categoryUsage.keys()])];
   return (
     <>
-      {open && (
-        <aside className="panel" aria-label="本地摘录侧栏">
-          <nav className="tabs">
-            {(
-              [
-                ["recent", "clock", "最近网页"],
-                ["tags", "tag", "标签"],
-                ["current", "pen", "当前页面"],
-              ] as const
-            ).map(([key, icon, label]) => (
-              <button
-                key={key}
-                className={tab === key ? "active" : ""}
-                onClick={() => setTab(key)}
-              >
-                <Icon name={icon} size={15} />
-                {label}
-              </button>
-            ))}
-            <button className="sidebar-close" aria-label="收起侧栏" title="收起侧栏" onClick={() => setOpen(false)}>
-              <Icon name="close" size={14} />
-            </button>
-          </nav>
-          <div className="search">
-            <input
-              aria-label="搜索摘录"
-              placeholder="搜索网页、摘录、评论、批注或标签…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <div className={tab === "tags" ? "scroll tag-scroll" : "scroll"}>
-            {tab === "recent" && (
-              <>
-                <div className="section-title">
-                  最近修改 · {pages.length} 个网页
-                </div>
-                {pages
-                  .filter((p) => matches(p))
-                  .map((p) => (
-                    <article className="card" key={p.id}>
-                      <div className="row">
-                        {p.favicon ? (
-                          <img
-                            className="favicon"
-                            src={p.favicon}
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                              e.currentTarget.style.display = "none";
-                            }}
-                          />
-                        ) : (
-                          <Icon name="page" />
-                        )}
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <button
-                            className="title"
-                            onClick={() =>
-                              void request({ type: "open", url: p.url }).catch(
-                                (e) => tell(String(e)),
-                              )
-                            }
-                          >
-                            {p.title}
-                          </button>
-                          <div className="url">{p.url}</div>
-                        </div>
-                      </div>
-                      {p.comment?.trim() && <div className="note page-comment-preview">{p.comment}</div>}
-                      <div className="row wrap" style={{ marginTop: 12 }}>
-                        <span className="badge">主分类：{p.category}</span>
-                        <span className="badge">
-                          {p.annotations.length} 条高亮
-                        </span>
-                        <span className="badge">
-                          {p.annotations.filter((a) => a.note.trim()).length}{" "}
-                          条批注
-                        </span>
-                        <small>
-                          {new Date(p.updatedAt).toLocaleDateString()}
-                        </small>
-                      </div>
-                    </article>
-                  ))}
-              </>
-            )}
-            {tab === "tags" && (
-              <TagBrowser
-                pages={pages} categories={allCategories} tags={allTags}
-                filter={filter} change={setFilter} query={query} matches={matches}
-                open={(p) => void request({ type: "open", url: p.url }).catch(e => tell(String(e)))}
-                annotation={card}
-              />
-            )}
-            {tab === "current" && (
-              <>
-                <div className="page-head">
-                  <h3>{current?.title ?? document.title}</h3>
-                  <div className="url">{url}</div>
-                  <PageCategory
-                    key={`category:${url}`}
-                    category={current?.category ?? DEFAULT_CATEGORY}
-                    categories={allCategories}
-                    counts={categoryUsage}
-                    browse={(name) => { setSearch(""); setFilter({ category: name, tags: [] }); setTab("tags"); }}
-                    change={async (category) => {
-                      const next = await request({
-                        type: "page-category", url, title: document.title,
-                        favicon: document.querySelector<HTMLLinkElement>('link[rel~="icon"]')?.href ?? "",
-                        category, expectedCategory: current?.category ?? DEFAULT_CATEGORY,
-                      });
-                      setLib(next);
-                      tell(next.status);
-                    }}
-                  />
-                  <PageTags
-                    key={url}
-                    tags={current?.tags ?? []}
-                    allTags={allTags}
-                    counts={tagUsage}
-                    browse={(t) => {
-                      setSearch("");
-                      setFilter({ category: "", tags: [t] });
-                      setTab("tags");
-                    }}
-                    change={async (tag, action) => {
-                      const next = await request({
-                        type: "page-tag",
-                        url,
-                        title: document.title,
-                        favicon:
-                          document.querySelector<HTMLLinkElement>(
-                            'link[rel~="icon"]',
-                          )?.href ?? "",
-                        tag,
-                        action,
-                      });
-                      setLib(next);
-                      tell(next.status);
-                    }}
-                  />
-                  <PageComment
-                    key={`comment:${url}`}
-                    comment={current?.comment ?? ""}
-                    draft={commentDrafts[url]}
-                    change={(value) => setCommentDrafts((all) => ({ ...all, [url]: value }))}
-                    reset={() => {
-                      setCommentDrafts((all) => {
-                        const next = { ...all };
-                        delete next[url];
-                        return next;
-                      });
-                      void load(true);
-                    }}
-                    save={async (draft) => {
-                      const next = await request({
-                        type: "page-comment",
-                        url,
-                        title: document.title,
-                        favicon: document.querySelector<HTMLLinkElement>('link[rel~="icon"]')?.href ?? "",
-                        comment: draft.value,
-                        expectedComment: draft.base,
-                      });
-                      setLib(next);
-                      setCommentDrafts((all) => {
-                        if (all[url] !== draft) return all;
-                        const remaining = { ...all };
-                        delete remaining[url];
-                        return remaining;
-                      });
-                      tell(next.status);
-                    }}
-                  />
-                </div>
-                {current?.annotations
-                  .slice()
-                  .sort((a, b) => a.anchor.start - b.anchor.start)
-                  .filter((m) => matches(current, m))
-                  .map((m) => card(current, m))}
-                {!current?.annotations.length && (
-                  <div className="empty">
-                    <Icon name="pen" size={30} />
-                    <p>可以只添加网页标签或评论。</p>
-                    <small>需要摘录时，选中网页文字即可高亮。</small>
-                    <small>悬停高亮按钮可以添加批注。</small>
-                  </div>
-                )}
-              </>
-            )}
-            {!pages.length && tab === "recent" && (
-              <div className="empty">
-                尚未保存网页。
-                <br />
-                已有 JSON？在设置中连接原文件夹。
-              </div>
-            )}
-          </div>
-          <footer className="footer">
-            <small className="footer-directory" title={lib.directoryName ? "目录：" + lib.directoryName : "本地文件夹未连接"}>
-              {lib.directoryName ? "目录：" + lib.directoryName : "目录未连接"}
-            </small>
-            <p className="status" role="status" title={lib.status}>{lib.status}</p>
-            <button aria-label="打开文章管理" title="打开仪表盘" onClick={() => void request({ type: "dashboard" }).catch(e => tell(String(e)))}>
-              <Icon name="dashboard" size={14} />
-              仪表盘
-            </button>
-            <button
-              title="目录与同步设置"
-              aria-label="目录与同步设置"
-              onClick={() => void openSettings()}
-            >
-              <Icon name="settings" size={14} />
-              设置
-            </button>
-          </footer>
-        </aside>
-      )}
       <div
         className="rail"
-        style={{ left: open ? "min(362px,calc(100vw - 34px))" : "2px" }}
+        style={{ left: "2px" }}
         data-geometry={geometry}
       >
         {current?.annotations.map((m) => {
@@ -763,104 +423,106 @@ function App() {
           <button onClick={() => setRebind(null)}>取消</button>
         </div>
       )}
-      {draft && (
+      {draft && !draft.id && (
         <Floating
-          className={draft.expanded ? "editor" : "quick"}
+          className="quick"
+          elementRef={quickRef}
           x={draft.x}
           y={draft.y}
           onMouseDown={(e) => {
-            if (!draft.expanded) e.preventDefault();
+            e.preventDefault();
           }}
         >
-          {!draft.expanded ? (
-            <button
-              aria-label="高亮选中文字"
-              disabled={busy}
-              onMouseEnter={() => {
-                clearTimeout(expandTimer.current);
-                expandTimer.current = setTimeout(
-                  () => setDraft((d) => (d ? { ...d, expanded: true } : d)),
-                  350,
-                );
-              }}
-              onMouseLeave={() => clearTimeout(expandTimer.current)}
-              onClick={() => {
-                clearTimeout(expandTimer.current);
-                void save();
-              }}
-            >
-              <Icon name="pen" />
+          <button
+            aria-label="高亮选中文字"
+            disabled={busy}
+            onMouseEnter={() => {
+              if (draft.expanded) return;
+              clearTimeout(expandTimer.current);
+              expandTimer.current = setTimeout(
+                () => setDraft((d) => (d ? { ...d, expanded: true } : d)),
+                350,
+              );
+            }}
+            onMouseLeave={() => clearTimeout(expandTimer.current)}
+            onClick={() => {
+              clearTimeout(expandTimer.current);
+              void save();
+            }}
+          >
+            <Icon name="pen" />
+          </button>
+        </Floating>
+      )}
+      {draft?.expanded && (
+        <Floating
+          className="editor"
+          x={draft.x}
+          y={draft.y}
+          anchorRef={draft.id ? undefined : quickRef}
+        >
+          <div className="row spread">
+            <b>{draft.id ? "编辑标注" : "新建标注"}</b>
+            <button aria-label="关闭编辑窗" onClick={() => setDraft(null)}>
+              <Icon name="close" size={16} />
             </button>
-          ) : (
-            <>
-              <div className="row spread">
-                <b>{draft.id ? "编辑标注" : "新建标注"}</b>
-                <button aria-label="关闭编辑窗" onClick={() => setDraft(null)}>
-                  <Icon name="close" size={16} />
-                </button>
-              </div>
-              <div className="excerpt">{draft.anchor.exact}</div>
-              <label>高亮颜色</label>
-              <div className="row colors">
-                {Object.entries(COLORS).map(([key, c]) => (
-                  <button
-                    key={key}
-                    title={c.name}
-                    aria-label={c.name}
-                    aria-pressed={draft.color === key}
-                    className={
-                      "swatch " + (draft.color === key ? "selected" : "")
-                    }
-                    style={{ "--mark": c.hex } as React.CSSProperties}
-                    onClick={() => setDraft({ ...draft, color: key as Color })}
-                  />
-                ))}
-              </div>
-              <label htmlFor="wc-note">批注</label>
-              <textarea
-                id="wc-note"
-                placeholder="写下你的想法…"
-                value={draft.note}
-                onChange={(e) => setDraft({ ...draft, note: e.target.value })}
-                onKeyDown={(e) => {
-                  if (
-                    e.key === "Enter" &&
-                    !e.shiftKey &&
-                    !e.nativeEvent.isComposing &&
-                    e.keyCode !== 229
-                  ) {
-                    e.preventDefault();
-                    void save();
-                  }
-                }}
+          </div>
+          <div className="excerpt">{draft.anchor.exact}</div>
+          <label>高亮颜色</label>
+          <div className="row colors">
+            {Object.entries(COLORS).map(([key, c]) => (
+              <button
+                key={key}
+                title={c.name}
+                aria-label={c.name}
+                aria-pressed={draft.color === key}
+                className={"swatch " + (draft.color === key ? "selected" : "")}
+                style={{ "--mark": c.hex } as React.CSSProperties}
+                onClick={() => setDraft({ ...draft, color: key as Color })}
               />
-              <div className="hint">Enter 保存 · Shift+Enter 换行</div>
-              {error && <p className="error">{error}</p>}
-              <div className="row editor-foot">
-                {draft.id && current && (
-                  <button
-                    className="danger"
-                    onClick={() => {
-                      const m = current.annotations.find(
-                        (m) => m.id === draft.id,
-                      );
-                      if (m) void remove(current, m);
-                    }}
-                  >
-                    删除
-                  </button>
-                )}
-                <button onClick={() => setDraft(null)}>取消</button>
-                <button
-                  disabled={busy}
-                  className="primary"
-                  onClick={() => void save()}
-                >
-                  {busy ? "保存中…" : "确认保存"}
-                </button>
-              </div>
-            </>
-          )}
+            ))}
+          </div>
+          <label htmlFor="wc-note">批注</label>
+          <textarea
+            id="wc-note"
+            placeholder="写下你的想法…"
+            value={draft.note}
+            onChange={(e) => setDraft({ ...draft, note: e.target.value })}
+            onKeyDown={(e) => {
+              if (
+                e.key === "Enter" &&
+                !e.shiftKey &&
+                !e.nativeEvent.isComposing &&
+                e.keyCode !== 229
+              ) {
+                e.preventDefault();
+                void save();
+              }
+            }}
+          />
+          <div className="hint">Enter 保存 · Shift+Enter 换行</div>
+          {error && <p className="error">{error}</p>}
+          <div className="row editor-foot">
+            {draft.id && current && (
+              <button
+                className="danger"
+                onClick={() => {
+                  const m = current.annotations.find((m) => m.id === draft.id);
+                  if (m) void remove(current, m);
+                }}
+              >
+                删除
+              </button>
+            )}
+            <button onClick={() => setDraft(null)}>取消</button>
+            <button
+              disabled={busy}
+              className="primary"
+              onClick={() => void save()}
+            >
+              {busy ? "保存中…" : "确认保存"}
+            </button>
+          </div>
         </Floating>
       )}
       {overlaps && overlaps.ids.length > 1 && (

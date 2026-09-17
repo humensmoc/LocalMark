@@ -19,9 +19,11 @@ export class SyncEngine {
     private files: Files,
     private persist: () => Promise<void>,
   ) {}
-  private async refresh() {
-    this.lib.errors = [];
-    const names = await this.files.listJson();
+  private async refresh(ids?: ReadonlySet<string>) {
+    const names = ids ? [...ids].map((id) => `${id}.json`) : await this.files.listJson();
+    this.lib.errors = ids
+      ? this.lib.errors.filter((error) => !names.some((name) => error.startsWith(`${name}：`)))
+      : [];
     const seen = new Set<string>();
     for (const name of names) {
       const id = name.slice(0, -5);
@@ -29,7 +31,10 @@ export class SyncEngine {
       const current = this.lib.entries[id];
       try {
         const raw = await this.files.read(`原始数据/${name}`);
-        if (raw === null) continue;
+        if (raw === null) {
+          seen.delete(id);
+          continue;
+        }
         const p = await parsePage(raw, id);
         const legacy = !Array.isArray(JSON.parse(raw).tags);
         const migrate = legacy || JSON.parse(raw).category === undefined;
@@ -91,17 +96,17 @@ export class SyncEngine {
       }
     }
     for (const [id, e] of Object.entries(this.lib.entries))
-      if (e.baseJson !== null && !seen.has(id))
+      if ((!ids || ids.has(id)) && e.baseJson !== null && !seen.has(id))
         e.issue = {
           kind: "missing",
           message:
             "本地 JSON 已被移走或删除。可恢复浏览器版本，或接受文件删除。",
         };
-    await this.persist();
   }
-  async run() {
-    await this.refresh();
+  async run(ids?: ReadonlySet<string>) {
+    await this.refresh(ids);
     for (const [id, e] of Object.entries(this.lib.entries)) {
+      if (ids && !ids.has(id)) continue;
       if (e.issue && e.issue.kind !== "io" && e.issue.kind !== "markdown")
         continue;
       try {
@@ -118,7 +123,6 @@ export class SyncEngine {
               message: "旧 Markdown 有手工改动，请先备份处理后再迁移。",
               external: old,
             };
-            await this.persist();
             continue;
           }
           let candidate = markdownFileName(e.page.title);
@@ -155,7 +159,6 @@ export class SyncEngine {
               message: "写入前发现 JSON 已改变，已暂停覆盖。",
               external: current ?? undefined,
             };
-            await this.persist();
             continue;
           }
           const value = serialize(e);
@@ -174,7 +177,6 @@ export class SyncEngine {
             message: "Markdown 有手工改动，已暂停覆盖；可备份后重新生成。",
             external: current,
           };
-          await this.persist();
           continue;
         }
         if (current !== intended) await this.files.write(mdPath(e), intended);
@@ -193,10 +195,8 @@ export class SyncEngine {
           delete e.legacyMdPath;
           delete e.legacyMdBase;
         }
-        await this.persist();
       } catch (error) {
         e.issue = { kind: "io", message: "文件写入失败：" + errorText(error) };
-        await this.persist();
       }
     }
     const pending = Object.values(this.lib.entries).filter(

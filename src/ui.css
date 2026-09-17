@@ -60,7 +60,7 @@ textarea {
   border: 1px solid #3c485c;
   border-radius: 7px;
   padding: 9px 10px;
-  background: #111822;
+  background: #000000;
   color: #eef3fa;
   min-width: 0;
 }
@@ -108,7 +108,7 @@ small {
   top: 0;
   width: min(360px, calc(100vw - 36px));
   height: 100dvh;
-  background: #1b222d;
+  background: #000000;
   border-right: 1px solid #364154;
   box-shadow: 5px 0 24px #0003;
   display: flex;
@@ -132,7 +132,6 @@ small {
   color: #b5c0cf;
   white-space: nowrap;
 }
-.tabs .sidebar-close { flex: 0 0 24px; width: 24px; height: 24px; padding: 3px; }
 .tabs .active {
   background: #23a883;
   color: #fff;
@@ -148,9 +147,10 @@ small {
   scrollbar-width: thin;
 }
 .footer {
+  position: relative;
   border-top: 1px solid #354053;
   padding: 5px 8px;
-  background: #19212b;
+  background: #000000;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) auto auto;
   align-items: center;
@@ -158,6 +158,16 @@ small {
   flex-shrink: 0;
 }
 .footer button { padding: 4px; font-size: 11px; gap: 4px; }
+.footer-version {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 4px);
+  background: transparent;
+  padding: 0 2px;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #b5c0cf;
+}
 .footer-directory, .footer .status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .status {
   font-size: 11px;
@@ -165,7 +175,7 @@ small {
   overflow-wrap: anywhere;
 }
 .card {
-  background: #232d3a;
+  background: #000000;
   border: 1px solid #354052;
   border-radius: 9px;
   margin: 9px 0;
@@ -184,7 +194,7 @@ small {
 }
 .note {
   white-space: pre-wrap;
-  background: #141c28;
+  background: #000000;
   border: 1px solid #344055;
   padding: 9px;
   border-radius: 6px;
@@ -193,7 +203,7 @@ small {
 }
 .tag {
   font-size: 11px;
-  background: #344253;
+  background: #000000;
   border-radius: 4px;
   padding: 2px 6px;
   color: #c5dfd8;
@@ -241,7 +251,7 @@ small {
 .badge {
   font-size: 11px;
   color: #aebccc;
-  background: #101722;
+  background: #000000;
   padding: 2px 6px;
   border-radius: 5px;
 }
@@ -253,7 +263,7 @@ small {
 .floating {
   position: fixed;
   pointer-events: auto;
-  background: #202a37;
+  background: #000000;
   border: 1px solid #43516a;
   border-radius: 12px;
   box-shadow: 0 10px 40px #0006;
@@ -302,7 +312,7 @@ small {
   padding: 9px;
   border: 1px solid #43516a;
   border-radius: 9px;
-  background: #141e29;
+  background: #000000;
 }
 .tag-options {
   max-height: 180px;
@@ -339,6 +349,7 @@ small {
   color: #b8e5d8;
 }
 .quick {
+  z-index: 1;
   width: auto;
   padding: 0;
   border-radius: 7px;
@@ -454,6 +465,12 @@ small {
 .page-head {
   padding: 8px 3px 14px;
 }
+.page-title-row { display: flex; align-items: flex-start; gap: 6px; }
+.page-title-row h3 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.title-edit { flex-shrink: 0; padding: 3px 5px; font-size: 12px; color: #83d9c0; }
+.page-title-editor { margin-bottom: 8px; }
+.page-title-editor label { display: block; margin-bottom: 6px; font-size: 12px; }
+.page-title-editor textarea { display: block; margin-bottom: 8px; }
 .page-category {
   margin-top: 14px;
 }
@@ -468,7 +485,7 @@ small {
   width: 100%;
   justify-content: flex-start;
   border: 1px solid #43516a;
-  background: #141e29;
+  background: #000000;
   overflow-wrap: anywhere;
 }
 .category-options {
@@ -539,22 +556,22 @@ small {
 .filter-label span { margin-left: 5px; font-weight: 400; font-size: 10px; color: #93a4b9; }
 .filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 11px; }
 .filter-chips:last-child { margin-bottom: 0; }
-.filter-chip { max-width: 100%; padding: 4px 7px; gap: 5px; border: 1px solid #3a485b; border-radius: 6px; background: #242e3d; font-size: 12px; line-height: 1.4; text-align: left; }
+.filter-chip { max-width: 100%; padding: 4px 7px; gap: 5px; border: 1px solid #3a485b; border-radius: 6px; background: #000000; font-size: 12px; line-height: 1.4; text-align: left; }
 .filter-chip > span { min-width: 0; overflow-wrap: anywhere; }
 .filter-chip small { font-size: 10px; color: #aab8ca; font-variant-numeric: tabular-nums; }
-.filter-chip:hover { border-color: #648277; background: #2c3e46; }
+.filter-chip:hover { border-color: #648277; background: #181818; }
 .filter-chip[aria-pressed="true"] { color: #abf4de; border-color: #44bb98; background: #1e483e; box-shadow: inset 0 0 0 1px #44bb9820; }
 .filter-chip[aria-pressed="true"] small { color: #abf4de; }
 .result-heading { padding: 10px 15px 8px; font-size: 13px; }
 .result-heading small { font-size: 11px; }
 .tag-results { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 12px; scrollbar-width: thin; }
-.result-card { padding: 13px; margin-bottom: 10px; border: 1px solid #3d4c60; border-radius: 10px; background: #242f3f; box-shadow: 0 2px 5px #0002; overflow-wrap: anywhere; }
+.result-card { padding: 13px; margin-bottom: 10px; border: 1px solid #3d4c60; border-radius: 10px; background: #000000; box-shadow: 0 2px 5px #0002; overflow-wrap: anywhere; }
 .result-card .tag-page-title { display: block; width: 100%; white-space: normal; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; color: #f1f5fa; font-weight: 650; margin: 0 0 9px; padding: 0; }
 .result-card .tag-page-title:hover { color: #a2ecd5; background: transparent; text-decoration: underline; }
 .result-taxonomy { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 4px; }
 .result-category, .result-tag { padding: 2px 6px; border-radius: 4px; font-size: 10px; line-height: 1.6; max-width: 100%; }
 .result-category { background: #315447; color: #b9edda; }
-.result-tag { background: #344156; color: #c1cfe0; }
+.result-tag { background: #000000; color: #c1cfe0; }
 .result-tag.selected { color: #b0f3dd; box-shadow: inset 0 0 0 1px #4b9c82; }
 .result-comment { position: relative; border-top: 1px solid #405066; padding-top: 9px; margin-top: 10px; }
 .result-comment > p { font-size: 12px; line-height: 1.75; color: #d2dce9; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
@@ -565,5 +582,66 @@ small {
 .result-annotations { margin-top: 9px; border-top: 1px solid #405066; padding-top: 5px; }
 .result-annotations summary span { color: #92a9bc; margin-left: 5px; }
 .result-annotations[open] summary span { display: none; }
-.result-annotations .card { background: #1b2635; padding: 9px; }
+.result-annotations .card { background: #000000; padding: 9px; }
 .result-empty { display: block; margin-top: 9px; font-size: 11px; }
+
+/* Keep site artwork below the readable content, clipped to each card only. */
+.page-surface { position: relative; isolation: isolate; }
+.page-surface > :not(.site-backdrop) { position: relative; z-index: 1; }
+.site-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  user-select: none;
+}
+.site-backdrop > img, .site-backdrop > .site-monogram {
+  position: absolute;
+  width: 156px;
+  height: 156px;
+  right: -12px;
+  top: calc(50% - 78px);
+  object-fit: contain;
+  filter: blur(12px) saturate(1.2);
+  opacity: 0.28;
+  transform: rotate(-12deg);
+  font-size: 100px;
+}
+.site-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, #00000096, #00000024);
+  box-shadow: inset 0 1px #ffffff08;
+}
+.site-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: #ffffff0c;
+  box-shadow: inset 0 0 0 1px #ffffff12;
+  overflow: hidden;
+}
+.site-icon > img { width: 22px; height: 22px; object-fit: contain; }
+.site-monogram {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 650;
+}
+.site-heading { display: flex; align-items: flex-start; gap: 9px; min-width: 0; margin-bottom: 9px; }
+.site-heading .tag-page-title { flex: 1; min-width: 0; margin-bottom: 0; }
+.page-title-row { gap: 9px; }
+.page-title-row > .site-icon { margin-top: 2px; }
+.page-head.page-surface { padding: 12px; border: 1px solid #354253; border-radius: 10px; }

@@ -1,9 +1,9 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { handleToolbarClick } from "../src/toolbar";
+import { ensurePageBridge } from "../src/toolbar";
 
 function api() {
   const chrome = {
-    tabs: { sendMessage: vi.fn().mockResolvedValue({ ready: true }) },
+    tabs: { sendMessage: vi.fn().mockResolvedValue({ ready: true, url: "https://example.com/article", version: "0.1.15" }) },
     scripting: {
       insertCSS: vi.fn().mockResolvedValue([]),
       executeScript: vi.fn().mockResolvedValue([]),
@@ -23,36 +23,32 @@ afterEach(() => {
 });
 const tab = { id: 7, url: "https://example.com/article" } as chrome.tabs.Tab;
 
-it("toolbar toggles a ready content script and does not open options", async () => {
+it("native panel connects to an existing page without injecting or toggling", async () => {
   const c = api();
-  await handleToolbarClick(tab);
+  const info = await ensurePageBridge(tab.id!);
+  expect(info.url).toBe(tab.url);
   expect(c.tabs.sendMessage.mock.calls.map((args) => args[1].type)).toEqual([
     "ping",
-    "toggle",
   ]);
   expect(c.scripting.executeScript).not.toHaveBeenCalled();
   expect(c.runtime.openOptionsPage).not.toHaveBeenCalled();
 });
-it("missing readiness acknowledgement reinjects and opens explicitly", async () => {
+it("an existing tab without a page bridge is injected and queried", async () => {
   const c = api();
   c.tabs.sendMessage.mockResolvedValueOnce(undefined);
-  await handleToolbarClick(tab);
+  await ensurePageBridge(tab.id!);
   expect(c.scripting.executeScript).toHaveBeenCalledOnce();
   expect(c.tabs.sendMessage.mock.calls.map((args) => args[1].type)).toEqual([
     "ping",
-    "show",
+    "ping",
   ]);
   expect(c.runtime.openOptionsPage).not.toHaveBeenCalled();
 });
-it("injection failure on a website reports the error without redirecting to options", async () => {
+it("site access failure propagates to the panel without redirecting", async () => {
   const c = api();
   vi.spyOn(console, "error").mockImplementation(() => {});
   c.tabs.sendMessage.mockRejectedValue(Error("No receiver"));
   c.scripting.executeScript.mockRejectedValue(Error("Site access denied"));
-  await handleToolbarClick(tab);
+  await expect(ensurePageBridge(tab.id!)).rejects.toThrow("Site access denied");
   expect(c.runtime.openOptionsPage).not.toHaveBeenCalled();
-  expect(c.action.setBadgeText).toHaveBeenCalledWith({ tabId: 7, text: "!" });
-  expect(c.action.setTitle.mock.calls[0][0].title).toContain(
-    "Site access denied",
-  );
 });

@@ -20,6 +20,8 @@ await writeFile(
   JSON.stringify({ extensions: { ui: { developer_mode: true } } }),
 );
 const extensionPath = resolve("dist");
+const { version: extensionVersion } = JSON.parse(await readFile(join(extensionPath, "manifest.json"), "utf8"));
+assert.equal(extensionVersion, JSON.parse(await readFile("package.json", "utf8")).version);
 const launchOptions = {
   channel: "chromium",
   headless: true,
@@ -126,6 +128,9 @@ try {
   const host = page.locator("#local-web-clipper-root");
   await page.keyboard.press("Control+b");
   await host.getByLabel("本地摘录侧栏").waitFor();
+  assert.equal(await host.locator(".footer-version").innerText(), extensionVersion);
+  await page.screenshot({ path: join(out, "sidebar-version.png") });
+  ok("sidebar footer displays the content script build version matching the packaged manifest");
   await host.getByLabel("搜索摘录").focus();
   await page.keyboard.press("Control+b");
   assert.equal(await host.getByLabel("本地摘录侧栏").count(), 1);
@@ -218,13 +223,38 @@ try {
   }
   await select("#first", 27, 49);
   await page.screenshot({ path: join(out, "quick-highlight.png") });
-  await host.getByRole("button", { name: "高亮选中文字" }).click();
+  const quickButton = host.getByRole("button", { name: "高亮选中文字" });
+  const quickBefore = await quickButton.boundingBox();
+  await quickButton.hover();
+  await host.getByLabel("批注", { exact: true }).waitFor();
+  assert.deepEqual(await quickButton.boundingBox(), quickBefore);
+  async function assertQuickAccessible() {
+    const quick = await host.locator(".quick").boundingBox();
+    const editor = await host.locator(".editor").boundingBox();
+    assert.ok(
+      editor.y >= quick.y + quick.height + 7 ||
+        editor.y + editor.height <= quick.y - 7,
+      "expanded editor must leave a gap around the quick button",
+    );
+    assert.equal(await quickButton.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      const hit = el.getRootNode().elementFromPoint(
+        rect.x + rect.width / 2, rect.y + rect.height / 2,
+      );
+      return hit === el || el.contains(hit);
+    }), true, "quick button must remain the pointer hit target");
+  }
+  await assertQuickAccessible();
+  await page.screenshot({ path: join(out, "quick-highlight-expanded.png") });
+  // Click the original pointer position after the hover timer has expanded the editor.
+  await page.mouse.click(quickBefore.x + quickBefore.width / 2, quickBefore.y + quickBefore.height / 2);
   await eventually(
     async () =>
       Object.values((await state()).entries)[0]?.page.annotations.length === 1,
     "quick highlight saved",
   );
-  ok("quick highlight saves selected text");
+  assert.equal(await host.locator(".quick, .editor").count(), 0);
+  ok("quick highlight remains stationary and clickable after hover expansion, then closes both controls");
   await select("#second", 0, 14);
   await host.getByRole("button", { name: "高亮选中文字" }).hover();
   await host.getByLabel("批注", { exact: true }).waitFor();
@@ -241,8 +271,24 @@ try {
       box.y + box.height <= 288
     );
   }, "editor respects all viewport margins after resize");
+  await assertQuickAccessible();
   await page.screenshot({ path: join(out, "editor-narrow.png") });
+  for (const [x, y] of [[1, 1], [399, 1], [1, 299], [399, 299]]) {
+    await page.locator("#second").dispatchEvent("mouseup", {
+      button: 0, clientX: x, clientY: y,
+    });
+    await host.locator(".editor").waitFor({ state: "hidden" });
+    const before = await quickButton.boundingBox();
+    await quickButton.hover();
+    await host.getByLabel("批注", { exact: true }).waitFor();
+    assert.deepEqual(await quickButton.boundingBox(), before);
+    await assertQuickAccessible();
+    const panel = await host.locator(".editor").boundingBox();
+    assert.ok(panel.x >= 12 && panel.y >= 12 && panel.x + panel.width <= 388 && panel.y + panel.height <= 288);
+  }
+  ok("all four corners in a 400x300 viewport keep the quick button stationary and unobstructed");
   await page.setViewportSize({ width: 1360, height: 960 });
+  await assertQuickAccessible();
   ok(
     "editor measures actual size, stays 12px inside all edges and scrolls in a short window",
   );
@@ -426,6 +472,10 @@ try {
       "授权恢复后写入",
     "denied permission retains edit",
   );
+  await eventually(
+    async () => /权限已失效/.test((await state()).status),
+    "background sync reports the permission failure after the browser save",
+  );
   const pendingSave = await state();
   assert.match(pendingSave.status, /权限已失效/);
   assert.equal(Object.values(pendingSave.entries)[0].dirty, true);
@@ -570,6 +620,10 @@ try {
   await page.setViewportSize({ width: 1360, height: 960 });
   await page.evaluate(() => document.body.classList.add("dark"));
   await page.screenshot({ path: join(out, "dark.png") });
+  await eventually(async () => {
+    const e = Object.values((await state()).entries)[0];
+    return !e.dirty && !e.mdDirty && !e.issue;
+  }, "flush browser edits before simulating an external JSON edit");
   await diskEdit("rebind-case");
   await rpc({ type: "snapshot", refresh: true });
   await host.getByRole("button", { name: "未定位 · 重新绑定" }).waitFor();
@@ -649,6 +703,55 @@ try {
     "DOM reappearance restored",
   );
   ok("dynamic text changes restore only matching ranges");
+  const titlePage = await context.newPage();
+  await titlePage.goto(base + "/title-only");
+  await inspectUI(titlePage);
+  await titlePage.keyboard.press("Control+b");
+  const titleHost = titlePage.locator("#local-web-clipper-root");
+  const titleInput = titleHost.getByLabel("网页标题", { exact: true });
+  await titleHost.getByRole("button", { name: "编辑标题", exact: true }).click();
+  await titleInput.fill("   ");
+  assert.equal(await titleHost.getByRole("button", { name: "保存标题", exact: true }).isDisabled(), true);
+  const manualTitle = "我整理的酒馆战棋笔记 <script>纯文本</script>";
+  await titleInput.fill(manualTitle);
+  await titleHost.getByRole("button", { name: "最近网页", exact: true }).click();
+  await titleHost.getByRole("button", { name: "当前页面", exact: true }).click();
+  assert.equal(await titleInput.inputValue(), manualTitle);
+  await titlePage.setViewportSize({ width: 360, height: 740 });
+  await titlePage.screenshot({ path: join(out, "title-editor-narrow.png") });
+  assert.equal(await titleHost.locator(".page-head").evaluate(el => el.scrollWidth <= el.clientWidth), true);
+  await titleInput.press("Control+Enter");
+  await eventually(async () => await titleHost.locator(".page-title-row h3").innerText() === manualTitle, "manual title save");
+  await titlePage.screenshot({ path: join(out, "title-saved-narrow.png") });
+  await titleHost.getByRole("button", { name: "编辑标题", exact: true }).click();
+  await titleInput.fill("取消的修改");
+  await titleHost.getByRole("button", { name: "取消", exact: true }).click();
+  assert.equal(await titleHost.locator(".page-title-row h3").innerText(), manualTitle);
+  await titlePage.reload();
+  await inspectUI(titlePage);
+  await titlePage.keyboard.press("Control+b");
+  await eventually(async () => await titleHost.locator(".page-title-row h3").innerText() === manualTitle, "manual title survives reload");
+  const titleEntry = Object.values((await state()).entries).find(e => e.page.url === titlePage.url());
+  assert.equal(titleEntry.page.annotations.length, 0);
+  await titleHost.getByRole("button", { name: "编辑标题", exact: true }).click();
+  await titleInput.fill("保留我的草稿");
+  const secondTitlePage = await context.newPage();
+  await secondTitlePage.goto(titlePage.url());
+  await inspectUI(secondTitlePage);
+  await secondTitlePage.keyboard.press("Control+b");
+  await eventually(async () => await secondTitlePage.locator("#local-web-clipper-root .page-title-row h3").innerText() === manualTitle, "second tab loads saved title before editing");
+  await secondTitlePage.getByRole("button", { name: "编辑标题", exact: true }).click();
+  await secondTitlePage.getByLabel("网页标题", { exact: true }).fill("其他标签页的标题");
+  await secondTitlePage.getByRole("button", { name: "保存标题", exact: true }).click();
+  await eventually(async () => await secondTitlePage.locator("#local-web-clipper-root .page-title-row h3").innerText() === "其他标签页的标题", "second tab saves new title");
+  await titleHost.getByRole("alert").filter({ hasText: "标题已有更新" }).waitFor();
+  assert.equal(await titleInput.inputValue(), "保留我的草稿");
+  assert.equal(await titleHost.getByRole("button", { name: "保存标题", exact: true }).isDisabled(), true);
+  await titleHost.getByRole("button", { name: "取消", exact: true }).click();
+  await eventually(async () => await titleHost.locator(".page-title-row h3").innerText() === "其他标签页的标题", "latest title after conflict");
+  await secondTitlePage.close();
+  await titlePage.close();
+  ok("manual title supports standalone save, cancel, draft retention, reload, narrow layout and concurrent edit protection");
   const commentPage = await context.newPage();
   await commentPage.goto(base + "/comment-only");
   await inspectUI(commentPage);
@@ -674,6 +777,10 @@ try {
   await commentHost.getByLabel("搜索或新建网页标签").press("Enter");
   await eventually(async () => (await state()).entries[commentEntry.page.id].page.tags.includes("网页收藏"), "tag added to comment-only page");
   await commentHost.getByLabel("添加网页标签").click();
+  await eventually(async () => {
+    const e = (await state()).entries[commentEntry.page.id];
+    return !e.dirty && !e.mdDirty && !e.issue;
+  }, "standalone comment and tags finish syncing");
   const commentExport = await settings.evaluate(async id => {
     const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle("原始数据");
@@ -704,6 +811,10 @@ try {
   await commentHost.getByRole("button", { name: "独立创作 1", exact: true, pressed: true }).waitFor();
   assert.equal(await commentHost.locator(".tag-page-title").count(), 1);
   await commentHost.getByRole("button", { name: "当前页面", exact: true }).click();
+  await eventually(async () => {
+    const e = (await state()).entries[commentEntry.page.id];
+    return !e.dirty && !e.mdDirty && !e.issue;
+  }, "category JSON and Markdown finish syncing");
   const categoryFile = await settings.evaluate(async id => {
     const root = await navigator.storage.getDirectory();
     const dir = await root.getDirectoryHandle("原始数据");
@@ -725,6 +836,7 @@ try {
   await secondCommentPage.goto(commentPage.url());
   await inspectUI(secondCommentPage);
   await secondCommentPage.keyboard.press("Control+b");
+  await eventually(async () => await secondCommentPage.getByLabel("网页评论", { exact: true }).inputValue() === commentText, "second tab loads saved comment before editing");
   await secondCommentPage.getByLabel("网页评论", { exact: true }).fill("另一个标签页修改");
   await secondCommentPage.getByRole("button", { name: "保存评论", exact: true }).click();
   await eventually(async () => (await state()).entries[commentEntry.page.id].page.comment === "另一个标签页修改", "other tab updates page comment");
@@ -752,6 +864,9 @@ try {
   const commentBounds = await commentInput.boundingBox();
   assert.ok(commentBounds.x >= 0 && commentBounds.x + commentBounds.width <= 390);
   assert.equal(await commentHost.locator(".panel").evaluate(el => el.scrollWidth <= el.clientWidth), true);
+  const versionBounds = await commentHost.locator(".footer-version").boundingBox();
+  assert.ok(versionBounds.x >= 0 && versionBounds.x + versionBounds.width <= 390 && versionBounds.y + versionBounds.height <= 620);
+  assert.equal(await commentHost.locator(".footer-version").innerText(), extensionVersion);
   await commentPage.screenshot({ path: join(out, "page-comment-narrow.png") });
   ok("page comments preserve drafts, search, reject stale edits, clear, reload and fit narrow windows");
   const recoveryPage = await context.newPage();
@@ -802,6 +917,7 @@ try {
   await recoveryHost.getByLabel("本地摘录侧栏").waitFor();
   assert.equal(await recoveryHost.getAttribute("data-stale"), null);
   assert.equal(await recoveryHost.count(), 1);
+  assert.equal(await recoveryHost.locator(".footer-version").innerText(), extensionVersion);
   await recoveryHost.getByLabel("收起侧栏").click();
   const rect = await recoveryPage.locator("#first b").boundingBox();
   await recoveryPage.mouse.move(rect.x + 1, rect.y + rect.height / 2);
@@ -812,7 +928,12 @@ try {
     { steps: 10 },
   );
   await recoveryPage.mouse.up();
-  await recoveryHost.getByRole("button", { name: "高亮选中文字" }).click();
+  const recoveryQuick = recoveryHost.getByRole("button", { name: "高亮选中文字" });
+  const recoveryQuickBefore = await recoveryQuick.boundingBox();
+  await recoveryQuick.hover();
+  await recoveryHost.getByLabel("批注", { exact: true }).waitFor();
+  assert.deepEqual(await recoveryQuick.boundingBox(), recoveryQuickBefore);
+  await recoveryPage.mouse.click(recoveryQuickBefore.x + recoveryQuickBefore.width / 2, recoveryQuickBefore.y + recoveryQuickBefore.height / 2);
   await eventually(
     async () => (await recoveryHost.locator(".rail button").count()) === 1,
     "real mouse quick highlight after extension reload",
@@ -823,7 +944,7 @@ try {
     .waitFor();
   await recoveryPage.screenshot({ path: join(out, "reload-recovery.png") });
   ok(
-    "extension reload plus stale DOM recovers sidebar and saves a real mouse selection without refreshing the website",
+    "extension reload plus stale DOM restores the expected build version and keeps quick highlight clickable after hover",
   );
   const version = context.browser().version();
   await context.close();

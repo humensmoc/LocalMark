@@ -15,8 +15,8 @@ import {
 } from "./model";
 import { DirectoryFiles } from "./files";
 import { SyncEngine } from "./sync";
+import { mergeSyncResult } from "./sync-state";
 import type { Request } from "./protocol";
-import { handleToolbarClick } from "./toolbar";
 let queue: Promise<unknown> = Promise.resolve();
 const serial = <T>(fn: () => Promise<T>): Promise<T> => {
   const next = queue.then(fn, fn);
@@ -36,28 +36,44 @@ async function library() {
   if (changed) await db.set("library", lib);
   return lib;
 }
-async function sync(lib: Library) {
+// Files are serialized separately: a slow disk must not hold the browser-save queue.
+let fileQueue: Promise<unknown> = Promise.resolve();
+const serialFiles = <T>(fn: () => Promise<T>): Promise<T> => {
+  const next = fileQueue.then(fn, fn);
+  fileQueue = next.catch(() => {});
+  return next;
+};
+async function sync(ids?: ReadonlySet<string>, resolution?: { pageId: string; choice: "local" | "disk" }) {
+  const before = await serial(library);
+  const lib = structuredClone(before);
+  const persist = () => serial(async () => {
+    const latest = mergeSyncResult(await library(), before, lib);
+    await db.set("library", latest);
+  });
   const root = await db.get<FileSystemDirectoryHandle>("root");
   if (!root) {
+    if (resolution) throw Error("请先在设置中连接并授权文件夹");
     delete lib.directoryName;
     lib.status = "尚未连接文件夹；已暂存浏览器，待同步";
-    await db.set("library", lib);
+    await persist();
     return;
   }
   try {
     lib.directoryName = root.name || "已授权目录";
     if ((await root.queryPermission({ mode: "readwrite" })) !== "granted") {
+      if (resolution) throw Error("请先在设置中连接并授权文件夹");
       lib.status = "文件夹权限已失效；已暂存浏览器，请在设置中重新授权";
-      await db.set("library", lib);
+      await persist();
       return;
     }
-    await new SyncEngine(lib, new DirectoryFiles(root), () =>
-      db.set("library", lib),
-    ).run();
+    const engine = new SyncEngine(lib, new DirectoryFiles(root), persist);
+    if (resolution) await engine.resolve(resolution.pageId, resolution.choice);
+    else await engine.run(ids);
   } catch (e) {
+    if (resolution) throw e;
     lib.status =
       "无法同步本地文件：" + (e instanceof Error ? e.message : String(e));
-    await db.set("library", lib);
+    await persist();
   }
 }
 async function notify() {
@@ -66,6 +82,33 @@ async function notify() {
   for (const tab of await chrome.tabs.query({}))
     if (tab.id)
       chrome.tabs.sendMessage(tab.id, { type: "changed" }).catch(() => {});
+}
+const pendingPages = new Set<string>();
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+let flushQueued = false;
+function scheduleSync(id: string) {
+  pendingPages.add(id);
+  if (flushTimer || flushQueued) return;
+  // Combine a short burst into one writer job. Durable dirty flags survive worker exit.
+  flushTimer = setTimeout(() => {
+    flushTimer = undefined;
+    flushQueued = true;
+    void serialFiles(async () => {
+      const ids = new Set(pendingPages);
+      pendingPages.clear();
+      try {
+        await sync(ids);
+        await notify();
+      } finally {
+        flushQueued = false;
+        const next = pendingPages.values().next().value;
+        if (next) scheduleSync(next);
+      }
+    }).catch(() => {});
+  }, 75);
+}
+function isLibraryUI(sender: chrome.runtime.MessageSender) {
+  return ["dashboard.html", "sidepanel.html"].some(path => sender.url === chrome.runtime.getURL(path));
 }
 async function handle(m: Request, sender: chrome.runtime.MessageSender) {
   if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
@@ -93,13 +136,7 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
     return library();
   }
   const lib = await library();
-  if (m.type === "snapshot") {
-    if (m.refresh) {
-      await sync(lib);
-      await notify();
-    }
-    return lib;
-  }
+  if (m.type === "snapshot") return lib;
   if (m.type === "directory-connected") {
     if (!sender.url?.startsWith(chrome.runtime.getURL("")))
       throw Error("只能从插件设置连接目录");
@@ -117,37 +154,29 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
       await db.set("library", lib);
     }
     await db.set("root", next);
-    await sync(lib);
-    await notify();
     return lib;
   }
-  if (m.type === "resolve") {
-    const root = await db.get<FileSystemDirectoryHandle>("root");
-    if (
-      !root ||
-      (await root.queryPermission({ mode: "readwrite" })) !== "granted"
-    )
-      throw Error("请先在设置中连接并授权文件夹");
-    await new SyncEngine(lib, new DirectoryFiles(root), () =>
-      db.set("library", lib),
-    ).resolve(m.pageId, m.choice);
-    await notify();
-    return lib;
-  }
-  if (m.type === "save" || m.type === "page-tag" || m.type === "page-comment" || m.type === "page-category") {
+  let changedId: string;
+  if (m.type === "save" || m.type === "page-tag" || m.type === "page-comment" || m.type === "page-category" || m.type === "page-title") {
     const dashboard = sender.url === chrome.runtime.getURL("dashboard.html");
-    if (dashboard) await sync(lib);
     const url = canonicalUrl(m.url);
     if (!/^https?:\/\//.test(url)) throw Error("仅支持 HTTP/HTTPS 网页");
     if (!dashboard && sender.tab?.url && canonicalUrl(sender.tab.url) !== url)
       throw Error("网页已切换，请重新选择文字");
     const id = await pageId(url),
       now = new Date().toISOString();
+    changedId = id;
     let e = lib.entries[id];
-    if (dashboard && (!e || e.issue))
+    if ((dashboard && !e) || (isLibraryUI(sender) && e?.issue))
       throw Error(e?.issue?.message ?? "该网页已不存在，请刷新列表。");
+    if (m.type === "page-title") {
+      if ((e?.page.title ?? null) !== m.expectedTitle)
+        throw Error("标题已在其他标签页或文件中修改，当前输入尚未保存。请复制输入后取消编辑，核对最新标题。");
+      if (typeof m.title !== "string" || !m.title.trim() || m.title.trim().length > 1000)
+        throw Error("标题不能为空，且不能超过 1000 个字符。");
+    }
     if (!e) {
-      const title = (m.title || new URL(url).hostname).slice(0, 1000);
+      const title = ((m.type === "page-title" ? m.title.trim() : m.title) || new URL(url).hostname).slice(0, 1000);
       const p: Page = {
         schemaVersion: 1,
         id,
@@ -170,7 +199,11 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
         mdDirty: true,
       };
     }
-    if (m.type === "page-category") {
+    if (m.type === "page-title") {
+      e.page.title = m.title.trim();
+      e.page.updatedAt = now;
+      e.dirty = e.mdDirty = true;
+    } else if (m.type === "page-category") {
       if (e.page.category !== m.expectedCategory)
         throw Error("主分类已在其他标签页或文件中修改，请刷新后重新选择。");
       e.page.category = PageCategorySchema.parse(m.category);
@@ -223,10 +256,10 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
       lib.lastColor = mark.color;
     }
   } else if (m.type === "delete") {
-    if (sender.url === chrome.runtime.getURL("dashboard.html")) {
-      await sync(lib);
+    if (isLibraryUI(sender)) {
       if (lib.entries[m.pageId]?.issue) throw Error(lib.entries[m.pageId].issue!.message);
     }
+    changedId = m.pageId;
     const e = lib.entries[m.pageId],
       old = e?.page.annotations.find((a) => a.id === m.id);
     if (
@@ -243,17 +276,40 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
   } else throw Error("未知操作");
   lib.status = "已暂存浏览器，正在写入文件";
   await db.set("library", lib);
-  await sync(lib);
-  await notify();
+  scheduleSync(changedId);
+  void notify().catch(() => {});
   return lib;
 }
+async function dispatch(m: Request, sender: chrome.runtime.MessageSender) {
+  if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
+  if (m.type === "directory-connected" || m.type === "resolve" ||
+      (m.type === "snapshot" && m.refresh)) {
+    return serialFiles(async () => {
+      if (m.type === "directory-connected") await serial(() => handle(m, sender));
+      await sync(undefined, m.type === "resolve" ? m : undefined);
+      await notify();
+      return serial(library);
+    });
+  }
+  // Keep dashboard compare-before-edit behavior for fields with expected versions.
+  // Tags are set operations and can be saved immediately; the writer checks disk conflicts.
+  if (isLibraryUI(sender) &&
+      ["save", "delete", "page-comment", "page-category", "page-title"].includes(m.type)) {
+    const id = m.type === "delete" ? m.pageId : "url" in m ? await pageId(canonicalUrl(m.url)) : "";
+    return serialFiles(async () => {
+      await sync(new Set([id]));
+      return serial(() => handle(m, sender));
+    });
+  }
+  return serial(() => handle(m, sender));
+}
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
-  if (message?.type === "changed") return false;
+  if (["changed", "page-updated"].includes(message?.type)) return false;
   // Opening settings must not wait behind a slow or stalled filesystem operation.
   const task =
     message?.type === "settings"
       ? handle(message, sender)
-      : serial(() => handle(message, sender));
+      : dispatch(message, sender);
   task.then(
     (data) => reply({ ok: true, data }),
     (e) =>
@@ -261,21 +317,20 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   );
   return true;
 });
-chrome.action.onClicked.addListener(handleToolbarClick);
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create("retry-sync", { periodInMinutes: 1 });
-});
+// Chrome owns action/shortcut toggling, including focus and the native close button.
+void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+// Recreate the retry alarm on worker startup too; alarms are not guaranteed across restarts.
+void chrome.alarms.create("retry-sync", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "retry-sync")
-    void serial(async () => {
-      const lib = await library();
-      if (
-        Object.values(lib.entries).some(
-          (e) => e.dirty || e.mdDirty || e.issue?.kind === "io",
-        )
-      ) {
-        await sync(lib);
+    void serialFiles(async () => {
+      const lib = await serial(library);
+      const ids = new Set(Object.entries(lib.entries)
+        .filter(([, e]) => e.dirty || e.mdDirty || e.issue?.kind === "io")
+        .map(([id]) => id));
+      if (ids.size) {
+        await sync(ids);
         await notify();
       }
-    });
+    }).catch(() => {});
 });
