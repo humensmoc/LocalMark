@@ -14,9 +14,14 @@ import { TagBrowser, type TagFilter } from "./TagBrowser";
 import { PageTags } from "./PageTags";
 import { PageCategory } from "./PageCategory";
 import { PageComment, type CommentDraft } from "./PageComment";
+import { PageTitle, type TitleDraft } from "./PageTitle";
+import { SiteIcon } from "./SiteIcon";
 import { Icon } from "./Icon";
+import { useDashboardLayout } from "./DashboardLayout";
 import "./ui.css";
 import "./dashboard.css";
+
+declare const __LOCALMARK_VERSION__: string;
 
 type MarkDraft = { base: Mark; text: string; note: string; color: Color };
 const changedMark = (d: MarkDraft) =>
@@ -24,6 +29,7 @@ const changedMark = (d: MarkDraft) =>
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function Dashboard() {
+  const layout = useDashboardLayout();
   const [lib, setLib] = useState<Library>(emptyLibrary());
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
@@ -31,11 +37,13 @@ function Dashboard() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [comments, setComments] = useState<Record<string, CommentDraft>>({});
+  const [titles, setTitles] = useState<Record<string, TitleDraft>>({});
   const [marks, setMarks] = useState<Record<string, MarkDraft>>({});
   const detail = useRef<HTMLElement>(null);
   const pending = useRef(0);
   const [saving, setSaving] = useState(false);
   const unsaved =
+    Object.values(titles).some((d) => d.value !== d.base) ||
     Object.values(comments).some((d) => d.value !== d.base) ||
     Object.values(marks).some(changedMark);
   async function mutate(m: Request) {
@@ -151,6 +159,14 @@ function Dashboard() {
       return next;
     });
   }
+  function resetTitle(id: string, expected?: TitleDraft) {
+    setTitles((all) => {
+      if (expected && all[id] !== expected) return all;
+      const next = { ...all };
+      delete next[id];
+      return next;
+    });
+  }
   return (
     <main className="dashboard">
       <header className="dashboard-header">
@@ -210,6 +226,8 @@ function Dashboard() {
         role="tabpanel"
         aria-labelledby="articles-tab"
         className="dashboard-workspace"
+        ref={layout.workspace}
+        style={layout.style}
       >
         <section className="dashboard-browser" aria-label="筛选与文章列表">
           <TagBrowser
@@ -222,6 +240,7 @@ function Dashboard() {
             matches={matches}
             selectedId={selectedId}
             wholeCard
+            filterDivider={layout.filterDivider}
             open={(p) => setSelectedId(p.id)}
             annotation={(_p, m) => (
               <blockquote key={m.id} className="list-excerpt">
@@ -231,6 +250,7 @@ function Dashboard() {
             )}
           />
         </section>
+        {layout.detailDivider}
         <section
           className="dashboard-detail"
           aria-label="文章详情"
@@ -248,9 +268,30 @@ function Dashboard() {
             </div>
           ) : (
             <>
-              <header className="detail-header">
-                <small>文章详情</small>
-                <h2>{page.title}</h2>
+              <header className="detail-header page-surface">
+                <SiteIcon site={page} backdrop />
+                <fieldset className="detail-title" disabled={!!selected.issue}>
+                  <PageTitle
+                    site={page}
+                    key={`title:${page.id}`}
+                    title={page.title}
+                    savedTitle={page.title}
+                    draft={titles[page.id]}
+                    change={(draft) =>
+                      setTitles((all) => ({ ...all, [page.id]: draft }))
+                    }
+                    cancel={() => resetTitle(page.id)}
+                    save={async (draft) => {
+                      await mutate({
+                        type: "page-title",
+                        ...common,
+                        title: draft.value,
+                        expectedTitle: draft.base,
+                      });
+                      resetTitle(page.id, draft);
+                    }}
+                  />
+                </fieldset>
                 <div className="detail-source">
                   <span title={page.url}>{page.url}</span>
                   <button
@@ -398,6 +439,7 @@ function Dashboard() {
         </section>
       </div>
       <footer className="dashboard-footer">
+        <span className="dashboard-version">v{__LOCALMARK_VERSION__}</span>
         <span title={lib.directoryName}>
           目录：{lib.directoryName ?? "未连接"}
         </span>
@@ -443,6 +485,28 @@ function MarkEditor({
       setBusy(false);
     }
   }
+  if (!draft)
+    return (
+      <article
+        className="mark-editor mark-preview"
+        aria-label="高亮摘录"
+        style={{ "--mark": COLORS[mark.color].hex } as React.CSSProperties}
+      >
+        <div className="mark-preview-heading">
+          <blockquote>{mark.text}</blockquote>
+          <button
+            aria-label="编辑高亮"
+            onClick={() => {
+              setError("");
+              change(d);
+            }}
+          >
+            编辑
+          </button>
+        </div>
+        {mark.note.trim() && <p className="mark-preview-note">{mark.note}</p>}
+      </article>
+    );
   return (
     <article
       className="mark-editor"
@@ -454,6 +518,8 @@ function MarkEditor({
           高亮原文
           <textarea
             aria-label="高亮原文"
+            autoFocus
+            rows={2}
             maxLength={100000}
             value={d.text}
             onChange={(e) => change({ ...d, text: e.target.value })}
@@ -480,6 +546,7 @@ function MarkEditor({
           批注
           <textarea
             aria-label="批注"
+            rows={2}
             maxLength={100000}
             placeholder="写下对这段原文的想法…"
             value={d.note}
@@ -504,7 +571,7 @@ function MarkEditor({
                   setError("");
                 }}
               >
-                放弃修改
+                取消编辑
               </button>
             )}
             <button
@@ -519,7 +586,7 @@ function MarkEditor({
         {(stale || error) && (
           <p className="error" role="alert">
             {error ||
-              "这条高亮已有更新，当前草稿仍保留。请复制需要的内容，再放弃修改以读取最新版本。"}
+              "这条高亮已有更新，当前草稿仍保留。请复制需要的内容，再取消编辑以读取最新版本。"}
           </p>
         )}
       </fieldset>

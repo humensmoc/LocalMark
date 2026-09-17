@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Mark, Page } from "./model";
+import { SiteIcon } from "./SiteIcon";
 
 export type TagFilter = { category: string; tags: string[] };
 
@@ -21,6 +22,7 @@ export function TagBrowser({
   annotation,
   selectedId,
   wholeCard = false,
+  filterDivider,
 }: {
   pages: Page[];
   categories: string[];
@@ -33,6 +35,7 @@ export function TagBrowser({
   annotation: (page: Page, mark: Mark) => ReactNode;
   selectedId?: string;
   wholeCard?: boolean;
+  filterDivider?: ReactNode;
 }) {
   const resultsRef = useRef<HTMLDivElement>(null);
   const searched = pages.filter((p) => matches(p));
@@ -141,6 +144,7 @@ export function TagBrowser({
           </div>
         </div>
       </section>
+      {filterDivider}
       <div className="result-heading">
         <b role="status">{results.length} 个网页</b>
         <small>最近修改优先</small>
@@ -163,7 +167,7 @@ export function TagBrowser({
         )}
         {results.map((p) => (
           <article
-            className={`result-card${p.id === selectedId ? " selected-article" : ""}`}
+            className={`result-card page-surface${p.id === selectedId ? " selected-article" : ""}`}
             key={p.id}
             onClick={wholeCard ? (event) => {
               // Nested controls keep their own behavior; dragging text is not selection.
@@ -171,6 +175,9 @@ export function TagBrowser({
               open(p);
             } : undefined}
           >
+            <SiteIcon site={p} backdrop />
+            <div className="site-heading">
+            <SiteIcon site={p} />
             <button
               className="title tag-page-title"
               title={p.title}
@@ -179,6 +186,7 @@ export function TagBrowser({
             >
               {p.title}
             </button>
+            </div>
             <div className="result-taxonomy">
               <span className="result-category">{p.category}</span>
               {p.tags.map((t) => (
