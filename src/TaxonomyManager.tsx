@@ -3,13 +3,16 @@ import type { Library } from "./model";
 import type { Request } from "./protocol";
 import { taxonomyToken, UNCATEGORIZED, type TaxonKind, type TaxonomyAction } from "./taxonomy";
 
-export function TaxonomyManager({ lib, mutate, close }: {
+export function TaxonomyManager({ lib, mutate, close, initialKind = "categories", initialId, createOnly = false }: {
   lib: Library; mutate: (m: Request) => Promise<unknown>; close: () => void;
+  initialKind?: TaxonKind; initialId?: string;
+  createOnly?: boolean;
 }) {
-  const [kind, setKind] = useState<TaxonKind>("categories");
+  const initialItem = !createOnly ? lib.taxonomy?.[initialKind].find(x => x.id === initialId && x.id !== UNCATEGORIZED) : undefined;
+  const [kind, setKind] = useState<TaxonKind>(initialKind);
   const [query, setQuery] = useState("");
-  const [name, setName] = useState("");
-  const [editing, setEditing] = useState<{ id: string; expected: string }>();
+  const [name, setName] = useState(initialItem?.name ?? "");
+  const [editing, setEditing] = useState<{ id: string; expected: string } | undefined>(initialItem ? { id: initialItem.id, expected: taxonomyToken(lib) } : undefined);
   const [target, setTarget] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -25,13 +28,14 @@ export function TaxonomyManager({ lib, mutate, close }: {
     setBusy(true); setError(""); setNotice("");
     try {
       await mutate({ type: "taxonomy", action, expected });
+      if (createOnly) { close(); return; }
       setEditing(undefined); setName(""); setTarget(""); setNotice("已保存到浏览器，文件同步状态请查看底栏。");
     } catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   }
-  return <dialog className="taxonomy-dialog" ref={dialog} aria-label="分类与标签管理" onCancel={e => { e.preventDefault(); if (!busy) close(); }}>
-    <div className="row spread"><h2>分类与标签管理</h2><button disabled={busy} onClick={close}>关闭管理</button></div>
-    <p>这里的重命名、合并和删除会作用于整个资料库。文章及高亮内容保留。</p>
+  return <dialog className="taxonomy-dialog" ref={dialog} aria-label={createOnly ? `新建${noun}` : "分类与标签管理"} onCancel={e => { e.preventDefault(); if (!busy) close(); }}>
+    <div className="row spread"><h2>{createOnly ? `新建${noun}` : "分类与标签管理"}</h2><button disabled={busy} onClick={close}>{createOnly ? "取消" : "关闭管理"}</button></div>
+    {!createOnly && <p>这里的重命名、合并和删除会作用于整个资料库。文章及高亮内容保留。</p>}
     {lib.taxonomyIssue && <div className="error" role="alert">
       <p>{lib.taxonomyIssue}</p>
       <div className="row wrap">{(["local", "disk"] as const).map(choice => <button key={choice} disabled={busy} onClick={async () => {
@@ -41,7 +45,7 @@ export function TaxonomyManager({ lib, mutate, close }: {
       }}>{choice === "local" ? "备份后保留浏览器分类" : "备份后读取文件分类"}</button>)}</div>
     </div>}
     <fieldset disabled={busy || !!lib.taxonomyIssue}>
-      <div className="row" role="group" aria-label="管理类型">
+      {!createOnly && <><div className="row" role="group" aria-label="管理类型">
         {(["categories", "tags"] as const).map(k => <button key={k} aria-pressed={kind === k} onClick={() => {
           setKind(k); setEditing(undefined); setName(""); setQuery(""); setTarget(""); setError(""); setNotice("");
         }}>{k === "categories" ? "主分类" : "标签"}</button>)}
@@ -53,7 +57,7 @@ export function TaxonomyManager({ lib, mutate, close }: {
           <button disabled={x.id === UNCATEGORIZED} onClick={() => { setEditing({ id: x.id, expected: taxonomyToken(lib) }); setName(x.name); setTarget(""); setError(""); }}>管理“{x.name}”</button>
         </div>)}
         {!catalog.length && <p>暂无{noun}，可以在下方新建。</p>}
-      </div>
+      </div></>}
       <form onSubmit={e => {
         e.preventDefault();
         const duplicate = catalog.find(x => x.name === name.trim() && x.id !== source?.id);

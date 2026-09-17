@@ -122,8 +122,8 @@ export type Library = {
   errors: string[];
   directoryName?: string;
 };
-export type Taxon = { id: string; name: string };
-export type Taxonomy = { version: 1; revision: string; categories: Taxon[]; tags: Taxon[] };
+export type Taxon = { id: string; name: string; description?: string };
+export type Taxonomy = { version: 1; revision: string; categories: Taxon[]; tags: Taxon[]; colorDescriptions?: Partial<Record<Color, string>> };
 export const emptyLibrary = (): Library => ({
   entries: {},
   lastColor: "yellow",

@@ -149,7 +149,9 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
     const changed = m.type === "taxonomy"
       ? manageTaxonomy(next, m.action, m.expected)
       : bulkTaxonomy(next, m.selected, m.action, m.expected);
-    next.status = `已修改 ${changed.length} 篇网页；已暂存浏览器，等待文件同步`;
+    next.status = m.type === "taxonomy" && m.action.operation === "describe"
+      ? "已更新资料说明；已暂存浏览器，等待文件同步"
+      : `已修改 ${changed.length} 篇网页；已暂存浏览器，等待文件同步`;
     await db.set("library", next);
     for (const id of changed) scheduleSync(id);
     scheduleSync();

@@ -4,10 +4,13 @@ import { DEFAULT_CATEGORIES, type Library, type Page, type Taxonomy, type Taxon 
 export const UNCATEGORIZED = "category:uncategorized";
 export const TAXONOMY_PATH = "分类标签.json";
 export type TaxonKind = "categories" | "tags";
-const item = z.object({ id: z.string().min(1).max(500), name: z.string().trim().min(1).max(100) });
+const description = z.string().max(100000);
+const colorId = z.enum(["yellow", "green", "blue", "pink", "purple"]);
+const item = z.object({ id: z.string().min(1).max(500), name: z.string().trim().min(1).max(100), description: description.optional() });
 export const TaxonomySchema = z.object({
   version: z.literal(1), revision: z.string().min(1),
   categories: z.array(item).max(10000), tags: z.array(item).max(10000),
+  colorDescriptions: z.record(colorId, description).optional(),
 }).superRefine((t, ctx) => {
   for (const kind of ["categories", "tags"] as const) {
     if (new Set(t[kind].map(x => x.id)).size !== t[kind].length ||
@@ -68,17 +71,32 @@ export function taxonomyToken(lib: Library) { return JSON.stringify(lib.taxonomy
 export function relationToken(p: Page) { return JSON.stringify([p.categoryId, p.tagIds]); }
 
 export type TaxonomyAction =
+  | { operation: "describe"; kind: TaxonKind | "colors"; id: string; description: string }
   | { operation: "create"; kind: TaxonKind; name: string }
-  | { operation: "rename"; kind: TaxonKind; id: string; name: string }
+  | { operation: "rename"; kind: TaxonKind; id: string; name: string; description?: string }
   | { operation: "merge" | "delete"; kind: TaxonKind; id: string; targetId?: string };
 
 /** Validate the whole operation before the caller persists this isolated library. */
 export function manageTaxonomy(lib: Library, action: TaxonomyAction, expected: string) {
-  z.enum(["create", "rename", "merge", "delete"]).parse(action.operation);
-  z.enum(["categories", "tags"]).parse(action.kind);
+  z.enum(["create", "rename", "merge", "delete", "describe"]).parse(action.operation);
   if (taxonomyToken(lib) !== expected) throw Error("分类或标签已改变，请刷新后重试。");
   if (lib.taxonomyIssue) throw Error(lib.taxonomyIssue);
   if (lib.errors.length) throw Error("存在无法读取的网页数据，请处理后再执行全库管理。");
+  if (action.operation === "describe") {
+    z.enum(["categories", "tags", "colors"]).parse(action.kind);
+    const value = description.parse(action.description);
+    if (action.kind === "colors") {
+      const id = colorId.parse(action.id);
+      lib.taxonomy!.colorDescriptions = { ...lib.taxonomy!.colorDescriptions, [id]: value };
+    } else {
+      const source = lib.taxonomy![action.kind].find(x => x.id === action.id);
+      if (!source) throw Error("分类或标签已不存在。");
+      source.description = value;
+    }
+    touchTaxonomy(lib);
+    return [];
+  }
+  z.enum(["categories", "tags"]).parse(action.kind);
   const catalog = lib.taxonomy![action.kind];
   if (action.operation === "create") {
     if (catalog.some(x => x.name === action.name.trim())) throw Error("名称已存在。");
@@ -93,8 +111,10 @@ export function manageTaxonomy(lib: Library, action: TaxonomyAction, expected: s
   if (affected.some(e => e.issue)) throw Error("相关网页存在同步冲突，请处理后重试。");
   if (action.operation === "rename") {
     const name = item.shape.name.parse(action.name);
+    const detail = action.description === undefined ? undefined : description.parse(action.description);
     if (catalog.some(x => x.id !== source.id && x.name === name)) throw Error("名称已存在，请使用合并操作。");
     source.name = name;
+    if (detail !== undefined) source.description = detail;
   } else {
     const targetId = action.targetId ?? (action.kind === "categories" ? UNCATEGORIZED : undefined);
     if (action.operation === "merge" && !action.targetId) throw Error("请选择合并目标。");

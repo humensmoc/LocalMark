@@ -102,4 +102,4 @@ ${h}[回到原文并高亮](<${X(n,o.anchor)}>)
 `}).join(`
 ---
 
-`);return t+r+s}function bt(n,e){return n===pt(e)||n===mt(e)||n===ht(e)||n===Q(e)||n===Q(e,!0)}async function wt(n,e){if(n.length>16e6)throw Error("JSON 文件过大");const t=lt.parse(JSON.parse(n));if(t.schemaVersion===1&&t.id!==await ft(t.url)||$e(t.url)!==t.url||e&&t.id!==e||!t.folderName.endsWith("--"+t.id))throw Error("网页 ID、URL 或目录不匹配");return t}export{yt as C,_t as D,ut as M,ot as P,ue as a,Q as b,$e as c,kt as d,vt as e,ft as f,xt as g,it as h,bt as i,dt as j,lt as k,Y as l,pt as m,Se as n,ce as o,wt as p,at as q,gt as r,x as s,X as t};
+`);return t+r+s}function bt(n,e){return n===pt(e)||n===mt(e)||n===ht(e)||n===Q(e)||n===Q(e,!0)}async function wt(n,e){if(n.length>16e6)throw Error("JSON 文件过大");const t=lt.parse(JSON.parse(n));if(t.schemaVersion===1&&t.id!==await ft(t.url)||$e(t.url)!==t.url||e&&t.id!==e||!t.folderName.endsWith("--"+t.id))throw Error("网页 ID、URL 或目录不匹配");return t}export{yt as C,_t as D,ut as M,ot as P,ue as a,Q as b,$e as c,kt as d,vt as e,ft as f,xt as g,it as h,bt as i,dt as j,lt as k,at as l,pt as m,Y as n,ce as o,wt as p,Se as q,gt as r,x as s,X as t};

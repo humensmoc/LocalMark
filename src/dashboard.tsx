@@ -21,6 +21,7 @@ import { useDashboardLayout } from "./DashboardLayout";
 import { TaxonomyManager } from "./TaxonomyManager";
 import { BulkToolbar } from "./BulkToolbar";
 import { taxonomyToken } from "./taxonomy";
+import { LIBRARY_VIEWS, LibraryNavigation, CatalogGrid, CatalogDetail, ContentCollection, catalogItems, changedDescription, type LibraryView, type CatalogKind, type DescriptionDraft } from "./LibraryViews";
 import "./ui.css";
 import "./dashboard.css";
 
@@ -36,7 +37,10 @@ function Dashboard() {
   const [lib, setLib] = useState<Library>(emptyLibrary());
   const [selectedId, setSelectedId] = useState("");
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
-  const [managing, setManaging] = useState(false);
+  const [managing, setManaging] = useState<false | "manage" | "create">(false);
+  const [view, setView] = useState<LibraryView>("pages");
+  const [catalogId, setCatalogId] = useState("");
+  const [descriptions, setDescriptions] = useState<Record<string, DescriptionDraft>>({});
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<TagFilter>({ category: "", tags: [] });
   const [error, setError] = useState("");
@@ -48,6 +52,7 @@ function Dashboard() {
   const pending = useRef(0);
   const [saving, setSaving] = useState(false);
   const unsaved =
+    Object.values(descriptions).some(changedDescription) ||
     Object.values(titles).some((d) => d.value !== d.base) ||
     Object.values(comments).some((d) => d.value !== d.base) ||
     Object.values(marks).some(changedMark);
@@ -157,6 +162,14 @@ function Dashboard() {
   const common = page
     ? { url: page.url, title: page.title, favicon: page.favicon }
     : null;
+  const catalogKind = (["categories", "tags", "colors"].includes(view) ? view : null) as CatalogKind | null;
+  const catalogItem = catalogKind ? catalogItems(lib, catalogKind).find(x => x.id === catalogId) : undefined;
+  const aggregate = view === "highlights" || view === "comments";
+  const viewInfo = LIBRARY_VIEWS.find(x => x.id === view)!;
+  function changeView(next: LibraryView) { setView(next); setQuery(""); setCatalogId(""); setCheckedIds([]); }
+  function openSource(p: Page) { setView("pages"); setQuery(""); setFilter({ category: "", tags: [] }); setSelectedId(p.id); }
+  const navigation = <LibraryNavigation view={view} lib={lib} change={changeView} />;
+  const sidebarFooter = <div className="library-sidebar-footer">本地摘录 <span>v{__LOCALMARK_VERSION__}</span></div>;
   function resetComment(id: string, expected?: CommentDraft) {
     setComments((all) => {
       if (expected && all[id] !== expected) return all;
@@ -188,19 +201,13 @@ function Dashboard() {
           <Icon name="dashboard" size={22} />
           <h1>本地摘录</h1>
         </div>
-        <nav aria-label="管理功能" role="tablist">
-          <button
-            id="articles-tab"
-            role="tab"
-            aria-selected="true"
-            aria-controls="articles-panel"
-            className="dashboard-tab active"
-          >
-            文章管理
-          </button>
-        </nav>
+        <span className="dashboard-section-name">资料库仪表盘</span>
+        <input className="dashboard-search"
+          aria-label={view === "pages" ? "搜索文章" : `搜索${viewInfo.label}`}
+          placeholder={catalogKind ? "搜索名称或说明…" : "搜索标题、标签、评论或摘录…"}
+          value={query} onChange={(e) => setQuery(e.target.value)} />
         <div className="dashboard-actions">
-          <button onClick={() => setManaging(true)}>分类与标签管理</button>
+          <button onClick={() => setManaging("manage")}>分类与标签管理</button>
           <button disabled={loading} onClick={() => void refresh()}>
             <Icon name="refresh" size={16} />
             {loading ? "读取中…" : "刷新本地数据"}
@@ -217,37 +224,23 @@ function Dashboard() {
           </button>
         </div>
       </header>
-      <div className="dashboard-toolbar">
-        <input
-          aria-label="搜索文章"
-          placeholder="搜索标题、标签、评论或摘录…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <small>
-          {pages.length} 篇收藏
-          {unsaved
-            ? " · 有未保存草稿，切换文章会保留"
-            : " · 选择文章，在右侧直接编辑"}
-        </small>
-      </div>
       {error && (
         <p className="dashboard-error error" role="alert">
           {error}
         </p>
       )}
-      {lib.taxonomyIssue && <p className="error" role="alert">{lib.taxonomyIssue} <button onClick={() => setManaging(true)}>处理分类数据冲突</button></p>}
-      {managing && <TaxonomyManager lib={lib} mutate={mutate} close={() => setManaging(false)} />}
+      {lib.taxonomyIssue && <p className="error" role="alert">{lib.taxonomyIssue} <button onClick={() => setManaging("manage")}>处理分类数据冲突</button></p>}
+      {managing && <TaxonomyManager lib={lib} mutate={mutate} close={() => setManaging(false)} initialKind={view === "tags" ? "tags" : "categories"} initialId={catalogId} createOnly={managing === "create"} />}
       <div
         id="articles-panel"
-        role="tabpanel"
-        aria-labelledby="articles-tab"
-        className="dashboard-workspace"
+        className={`dashboard-workspace ${aggregate ? "aggregate-workspace" : ""}`}
         ref={layout.workspace}
         style={layout.style}
       >
-        <section className="dashboard-browser" aria-label="筛选与文章列表">
+        {view === "pages" ? <section className="dashboard-browser" aria-label="筛选与文章列表">
           <TagBrowser
+            navigation={navigation}
+            sidebarFooter={sidebarFooter}
             taxonomy={lib.taxonomy}
             selection={{ ids: checkedIds, toggle: id => setCheckedIds(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]) }}
             selectionControls={<BulkToolbar key={JSON.stringify([query, filter])} lib={lib} selected={checkedIds}
@@ -271,8 +264,25 @@ function Dashboard() {
               </blockquote>
             )}
           />
-        </section>
-        {layout.detailDivider}
+        </section> : <section className="dashboard-browser library-browser" aria-label={`${viewInfo.label}列表`}>
+          <aside className="library-rail">{navigation}{sidebarFooter}</aside>
+          {layout.filterDivider}
+          {catalogKind ? <CatalogGrid lib={lib} kind={catalogKind} query={query} selected={catalogId} choose={setCatalogId} manage={() => setManaging("create")} />
+            : <ContentCollection pages={pages} view={view as "highlights" | "comments"} query={query} open={openSource} />}
+        </section>}
+        {!aggregate && layout.detailDivider}
+        {!aggregate && (catalogKind ? <section className="dashboard-detail" aria-label="内容详情">
+          {catalogItem ? <CatalogDetail key={`${catalogKind}:${catalogId}`} lib={lib} kind={catalogKind} item={catalogItem}
+            draft={descriptions[`${catalogKind}:${catalogId}`]} change={draft => setDescriptions(all => ({ ...all, [`${catalogKind}:${catalogId}`]: draft }))}
+            reset={expected => setDescriptions(all => {
+              const key = `${catalogKind}:${catalogId}`;
+              if (expected && all[key] !== expected) return all;
+              const next = { ...all }; delete next[key]; return next;
+            })} mutate={mutate} open={openSource} manage={() => setManaging("manage")} browse={() => {
+              setView("pages"); setQuery(""); setSelectedId("");
+              setFilter(catalogKind === "categories" ? { category: catalogId, tags: [] } : { category: "", tags: [catalogId] });
+            }} /> : <div className="dashboard-empty"><Icon name={viewInfo.icon} size={36} /><h2>选择一个{viewInfo.label === "颜色" ? "颜色" : viewInfo.label}</h2><p>查看关联内容，写下你的理解与说明。</p></div>}
+        </section> :
         <section
           className="dashboard-detail"
           aria-label="文章详情"
@@ -283,7 +293,7 @@ function Dashboard() {
               <Icon name="page" size={36} />
               <h2>{selectedId ? "文章已不在当前数据中" : "选择一篇文章"}</h2>
               <p>
-                从左侧筛选，在列表中选择文章。
+                在中间筛选并选择文章。
                 <br />
                 这里可以修改标签、评论和高亮批注。
               </p>
@@ -453,10 +463,11 @@ function Dashboard() {
               </fieldset>
             </>
           )}
-        </section>
+        </section>)}
       </div>
       <footer className="dashboard-footer">
         <span className="dashboard-version">v{__LOCALMARK_VERSION__}</span>
+        {unsaved && <span className="draft-status">有未保存草稿</span>}
         <span title={lib.directoryName}>
           目录：{lib.directoryName ?? "未连接"}
         </span>

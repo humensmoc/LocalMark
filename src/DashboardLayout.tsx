@@ -111,7 +111,7 @@ function ColumnDivider({
       className={`dashboard-divider ${index === 0 ? "filter-divider" : "detail-divider"}${active ? " dragging" : ""}`}
       role="separator"
       aria-label={
-        index === 0 ? "调整筛选栏与网页列表宽度" : "调整网页列表与文章详情宽度"
+        index === 0 ? "调整导航栏与内容列表宽度" : "调整内容列表与详情宽度"
       }
       aria-orientation="vertical"
       aria-valuemin={Math.round((minimums[index] / pair) * 100)}

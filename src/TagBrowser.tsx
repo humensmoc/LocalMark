@@ -26,6 +26,8 @@ export function TagBrowser({
   taxonomy,
   selection,
   selectionControls,
+  navigation,
+  sidebarFooter,
 }: {
   pages: Page[];
   categories: string[];
@@ -42,6 +44,8 @@ export function TagBrowser({
   taxonomy?: Taxonomy;
   selection?: { ids: string[]; toggle: (id: string) => void };
   selectionControls?: ReactNode;
+  navigation?: ReactNode;
+  sidebarFooter?: ReactNode;
 }) {
   const categoryId = (p: Page) => taxonomy ? p.categoryId : p.category;
   const tagIds = (p: Page) => taxonomy ? p.tagIds ?? [] : p.tags;
@@ -90,6 +94,8 @@ export function TagBrowser({
     .filter((option) => option.count > 0);
   return (
     <div className="tag-browser">
+      {navigation && <aside className="library-rail">{navigation}{sidebarFooter}</aside>}
+      {filterDivider}
       <section className="filter-panel" aria-label="标签筛选条件">
         <div className="filter-heading">
           <b>筛选网页</b>
@@ -154,7 +160,6 @@ export function TagBrowser({
           </div>
         </div>
       </section>
-      {filterDivider}
       {selectionControls}
       <div className="result-heading">
         <b role="status">{results.length} 个网页</b>

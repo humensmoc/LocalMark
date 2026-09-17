@@ -4,6 +4,8 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
     pen: "m15 3 6 6-12 12H3v-6L15 3Zm-10 13 3 3M13 5l6 6",
     clock: "M12 8v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
     tag: "M3 3h8l10 10-8 8L3 11V3Zm4 4h.01",
+    comment: "M4 4h16v12H9l-5 4V4Zm4 4h8m-8 4h5",
+    palette: "M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 0-4 2 2 0 0 1 0-4h4a4 4 0 0 0 4-4c0-3-4-6-9-6ZM7 8h.01M11 6h.01M16 8h.01M6 13h.01",
     page: "M5 3h10l4 4v14H5V3Zm4 7h6m-6 4h6m-6 4h4",
     close: "m6 6 12 12M6 18 18 6",
     settings:

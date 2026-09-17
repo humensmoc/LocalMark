@@ -45,6 +45,33 @@ it("migrates identical names to shared IDs once and round-trips a standalone lib
   expect(reopened.taxonomy).toEqual(lib.taxonomy);
 });
 
+it("round-trips category, tag and color descriptions without rewriting pages and rejects stale edits", async () => {
+  const { lib, files, engine, pages } = await setup();
+  const before = JSON.stringify(pages);
+  const category = pages[0].categoryId!, tag = pages[0].tagIds![0];
+  const oldToken = taxonomyToken(lib);
+  act(lib, { operation: "describe", kind: "categories", id: category, description: "定义与边界\n保留完整说明" });
+  act(lib, { operation: "describe", kind: "tags", id: tag, description: "跨分类的主题" });
+  act(lib, { operation: "describe", kind: "colors", id: "yellow", description: "重要观点" });
+  act(lib, { operation: "describe", kind: "categories", id: UNCATEGORIZED, description: "尚待归档" });
+  expect(() => manageTaxonomy(lib, { operation: "describe", kind: "colors", id: "yellow", description: "旧草稿" }, oldToken)).toThrow();
+  expect(() => act(lib, { operation: "describe", kind: "colors", id: "invalid", description: "无效" })).toThrow();
+  expect(() => act(lib, { operation: "describe", kind: "tags", id: "deleted", description: "无效" })).toThrow();
+  const writes = files.writes.length;
+  await engine.run();
+  expect(files.writes.slice(writes)).toEqual([TAXONOMY_PATH]);
+  expect(JSON.stringify(pages)).toBe(before);
+  const reopened = emptyLibrary();
+  await new SyncEngine(reopened, files, async () => {}).run();
+  expect(reopened.taxonomy).toEqual(lib.taxonomy);
+  expect(reopened.taxonomy?.colorDescriptions?.yellow).toBe("重要观点");
+  expect(reopened.taxonomy?.tags.find(x => x.id === tag)?.description).toBe("跨分类的主题");
+  act(reopened, { operation: "rename", kind: "tags", id: tag, name: "新名称" });
+  expect(reopened.taxonomy?.tags.find(x => x.id === tag)?.description).toBe("跨分类的主题");
+  act(reopened, { operation: "describe", kind: "colors", id: "yellow", description: "" });
+  expect(reopened.taxonomy?.colorDescriptions?.yellow).toBe("");
+});
+
 it("renames categories and tags without changing IDs, timestamps or other fields", async () => {
   const { lib, pages, engine, files } = await setup();
   const before = structuredClone(pages[0]);
@@ -66,6 +93,18 @@ it("keeps removed defaults removed and retains empty user categories across relo
   expect(reopened.taxonomy!.categories.some(x => x.name === "游戏设计")).toBe(false);
   expect(reopened.taxonomy!.categories.some(x => x.name === "以后再读")).toBe(true);
   expect(pages[0].categoryId).toBe(UNCATEGORIZED);
+});
+
+it("saves a name and description together and validates both before mutation", async () => {
+  const { lib, pages } = await setup();
+  const id = pages[0].tagIds![0];
+  const before = JSON.stringify(lib);
+  expect(() => act(lib, { operation: "rename", kind: "tags", id, name: "新名称", description: "x".repeat(100001) })).toThrow();
+  expect(JSON.stringify(lib)).toBe(before);
+  act(lib, { operation: "rename", kind: "tags", id, name: "新名称", description: "同时更新说明" });
+  expect(lib.taxonomy!.tags.find(x => x.id === id)).toMatchObject({ name: "新名称", description: "同时更新说明" });
+  expect(pages[0].tagIds).toContain(id);
+  expect(pages[0].tags).toContain("新名称");
 });
 
 it("merges tag IDs and deduplicates relationships", async () => {

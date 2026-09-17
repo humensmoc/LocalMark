@@ -220,7 +220,7 @@ try {
   );
   ok("selecting an article opens its detail without navigating to its website");
   const bounds = await page
-    .locator(".filter-panel, .tag-results, .dashboard-detail")
+    .locator(".library-rail, .tag-results, .dashboard-detail")
     .evaluateAll((nodes) =>
       nodes.map((n) => {
         const r = n.getBoundingClientRect();
@@ -232,8 +232,15 @@ try {
       bounds[1].right <= bounds[2].left + 2,
   );
   ok("wide window has three adjacent columns");
+  const filterBox = await page.locator(".filter-panel").boundingBox();
+  const resultBox = await page.locator(".tag-results").boundingBox();
+  assert.equal(filterBox.x, resultBox.x, "webpage filters belong to the center column");
+  assert.ok(filterBox.y + filterBox.height <= resultBox.y);
+  assert.equal(await page.locator(".library-rail .filter-panel").count(), 0);
+  assert.equal(await page.locator(".dashboard-toolbar").count(), 0);
+  assert.equal(await page.locator(".dashboard-header input[aria-label='搜索文章']").count(), 1);
   const columnWidths = () => page
-    .locator(".filter-panel, .tag-results, .dashboard-detail")
+    .locator(".library-rail, .tag-results, .dashboard-detail")
     .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().width));
   const gridColumns = () => list.locator(".tag-results").evaluate(
     (node) => getComputedStyle(node).gridTemplateColumns.split(" ").length,
@@ -673,6 +680,124 @@ try {
   assert.equal(await reopenedDetail.getByRole("group", { name: "高亮颜色" }).count(), 1);
   await reopenedDetail.getByRole("button", { name: "取消编辑", exact: true }).click();
   ok("multiple highlights remain compact and only the chosen highlight enters edit mode");
+  const navigation = reopened.getByRole("navigation", { name: "资料库视图" });
+  const view = async name => navigation.getByRole("button", { name: new RegExp(`^${name}`) }).click();
+  await view("主分类");
+  await reopened.locator(".catalog-card").filter({ hasText: "游戏设计" }).click();
+  const description = reopened.getByRole("textbox", { name: "内容说明", exact: true });
+  await description.fill("关于玩家目标、规则与反馈的设计。\n收录可以帮助判断玩法的原理与案例。");
+  await view("高亮内容");
+  assert.equal(await reopened.locator(".content-card").count(), 6);
+  assert.equal(await reopened.locator(".content-note").count(), 3);
+  assert.equal(await reopened.locator(".dashboard-detail").count(), 0);
+  assert.ok(await reopened.locator(".library-sidebar-footer").textContent().then(x => x.includes(`v${buildVersion}`)));
+  await reopened.getByRole("textbox", { name: "搜索高亮内容" }).fill("摘录 2");
+  assert.equal(await reopened.locator(".content-card").count(), 1, "search filters individual excerpts, not every excerpt on a matched page");
+  await view("主分类");
+  await reopened.locator(".catalog-card").filter({ hasText: "游戏设计" }).click();
+  assert.match(await description.inputValue(), /玩家目标/);
+  await reopened.getByRole("button", { name: "保存说明", exact: true }).click();
+  await reopened.waitForFunction(() => document.querySelector('.catalog-card.selected')?.textContent.includes("收录可以"));
+  const nameInput = reopened.getByRole("textbox", { name: "分类或标签名称", exact: true });
+  await nameInput.fill("玩法设计");
+  await reopened.getByRole("button", { name: "保存名称", exact: true }).click();
+  await reopened.locator(".catalog-detail h2").filter({ hasText: "玩法设计" }).waitFor();
+  assert.match(await description.inputValue(), /收录可以/);
+  await nameInput.fill("游戏设计");
+  await reopened.getByRole("button", { name: "保存名称", exact: true }).click();
+  await reopened.locator(".catalog-detail h2").filter({ hasText: "游戏设计" }).waitFor();
+  const cardBox = await reopened.locator(".catalog-card").first().boundingBox();
+  assert.ok(cardBox.height < 130, "catalog cards are compact");
+  assert.ok(await reopened.locator(".catalog-card-title strong").first().evaluate(n => parseFloat(getComputedStyle(n).fontSize)) >= 17);
+  await reopened.screenshot({ path: join(out, "library-categories.png"), fullPage: true });
+  await reopened.getByRole("button", { name: "筛选网页", exact: true }).click();
+  assert.equal(await reopened.getByRole("group", { name: "主分类筛选" }).getByRole("button", { name: /游戏设计/ }).getAttribute("aria-pressed"), "true");
+  await view("子标签");
+  await reopened.locator(".catalog-card").first().click();
+  await description.fill("跨文章复用的主题线索。");
+  const tagName = await nameInput.inputValue();
+  await nameInput.fill(`${tagName} · 整理`);
+  await view("高亮内容");
+  await view("子标签");
+  await reopened.locator(".catalog-card").first().click();
+  assert.equal(await nameInput.inputValue(), `${tagName} · 整理`);
+  await reopened.getByRole("button", { name: "保存名称", exact: true }).click();
+  await reopened.waitForFunction(() => document.querySelector('.catalog-card.selected')?.textContent.includes("主题线索"));
+  await reopened.getByRole("button", { name: "合并或删除", exact: true }).click();
+  assert.equal(await reopened.getByRole("group", { name: "管理类型" }).getByRole("button", { name: "标签", exact: true }).getAttribute("aria-pressed"), "true");
+  await reopened.getByRole("button", { name: "关闭管理" }).click();
+  await reopened.getByRole("button", { name: "新建子标签", exact: true }).click();
+  const createDialog = reopened.getByRole("dialog", { name: "新建标签", exact: true });
+  assert.equal(await createDialog.locator(".taxonomy-list").count(), 0);
+  await createDialog.getByRole("textbox", { name: "分类或标签名称" }).fill("新建入口测试");
+  await createDialog.getByRole("button", { name: "新建", exact: true }).click();
+  await reopened.locator(".catalog-card").filter({ hasText: "新建入口测试" }).waitFor();
+  await view("颜色");
+  assert.equal(await reopened.locator(".catalog-card").count(), 5);
+  await reopened.locator(".catalog-card").filter({ hasText: "黄色" }).click();
+  await description.fill("值得记住的核心观点。");
+  await reopened.getByRole("button", { name: "保存说明", exact: true }).click();
+  await reopened.waitForFunction(() => document.querySelector('.catalog-card.selected')?.textContent.includes("核心观点"));
+  assert.equal(await reopened.locator(".catalog-related .content-card").count(), 3);
+  await reopened.screenshot({ path: join(out, "library-colors.png"), fullPage: true });
+  await reopened.setViewportSize({ width: 900, height: 850 });
+  assert.equal(await reopened.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await reopened.screenshot({ path: join(out, "library-medium.png"), fullPage: true });
+  await reopened.setViewportSize({ width: 480, height: 850 });
+  assert.equal(await reopened.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await reopened.screenshot({ path: join(out, "library-narrow.png"), fullPage: true });
+  await reopened.setViewportSize({ width: 1440, height: 960 });
+  await view("独立批注");
+  assert.equal(await reopened.locator(".comment-card").count(), 3);
+  assert.equal(await reopened.locator(".content-note").count(), 0);
+  const commentCards = reopened.locator(".comment-card");
+  assert.match(await commentCards.first().locator(".standalone-comment").textContent(), /批注：结合核心循环/);
+  assert.equal(await reopened.locator(".comment-card").filter({ hasText: "另一窗口更新" }).count(), 0, "page descriptions are excluded");
+  await commentCards.first().getByText("查看对应高亮", { exact: true }).click();
+  assert.equal(await commentCards.first().locator("blockquote").isVisible(), true);
+  assert.match(await commentCards.first().locator("blockquote").textContent(), /摘录/);
+  assert.match(await navigation.getByRole("button", { name: /^独立批注/ }).textContent(), /3$/);
+  await reopened.screenshot({ path: join(out, "library-comments.png"), fullPage: true });
+  await reopened.getByRole("textbox", { name: "搜索独立批注" }).fill("不可能匹配的字符串");
+  await reopened.getByRole("heading", { name: "没有匹配的内容" }).waitFor();
+  await view("高亮内容");
+  await reopened.screenshot({ path: join(out, "library-highlights.png"), fullPage: true });
+  await reopened.locator(".content-source").first().click();
+  await reopenedDetail.getByRole("button", { name: "编辑高亮", exact: true }).first().waitFor();
+  await reopened.reload();
+  await view("颜色");
+  await reopened.locator(".catalog-card").filter({ hasText: "黄色" }).click();
+  assert.equal(await description.inputValue(), "值得记住的核心观点。");
+  await view("主分类");
+  await reopened.locator(".catalog-card").filter({ hasText: "游戏设计" }).click();
+  assert.match(await description.inputValue(), /收录可以/);
+  await description.fill("尚未保存的理解");
+  const currentLibrary = (await rpc(reopened, { type: "snapshot" })).data;
+  const categoryId = currentLibrary.taxonomy.categories.find(x => x.name === "游戏设计").id;
+  const concurrentDescription = await rpc(reopened, { type: "taxonomy", expected: JSON.stringify(currentLibrary.taxonomy),
+    action: { operation: "describe", kind: "categories", id: categoryId, description: "另一窗口修改的分类说明" } });
+  assert.equal(concurrentDescription.ok, true);
+  await reopened.getByText("分类资料已更新，草稿已保留。", { exact: false }).waitFor();
+  assert.equal(await description.inputValue(), "尚未保存的理解");
+  assert.equal(await reopened.getByRole("button", { name: "保存说明", exact: true }).isDisabled(), true);
+  await reopened.getByRole("button", { name: "取消修改", exact: true }).click();
+  assert.equal(await description.inputValue(), "另一窗口修改的分类说明");
+  ok("six library views, description persistence, draft retention, content search, associations and responsive layouts");
+  for (let i = 0; i < 35; i++) {
+    const reply = await rpc(reopened, { type: "page-tag", ...common, tag: `筛选密度测试${i + 1}`, action: "add" });
+    assert.equal(reply.ok, true, reply.error);
+  }
+  await view("网页");
+  const clearFilters = reopened.getByRole("button", { name: "清空筛选", exact: true });
+  if (await clearFilters.isEnabled()) await clearFilters.click();
+  const filterMetrics = await reopened.locator(".filter-options").evaluate(n => ({ scroll: n.scrollHeight, height: n.clientHeight }));
+  assert.ok(filterMetrics.scroll > filterMetrics.height, "many tags scroll within the filter panel");
+  assert.ok((await reopened.locator(".tag-results").boundingBox()).height > 200, "filters leave space to browse webpages");
+  await reopened.screenshot({ path: join(out, "dashboard-many-filters.png"), fullPage: true });
+  await reopened.setViewportSize({ width: 480, height: 850 });
+  assert.equal(await reopened.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await reopened.screenshot({ path: join(out, "dashboard-many-filters-narrow.png"), fullPage: true });
+  ok("dense filters scroll independently while keeping webpage cards accessible");
   assert.deepEqual(errors, []);
   ok("no uncaught browser errors");
   await writeFile(
