@@ -11,7 +11,25 @@ export class DirectoryFiles implements Files {
     let dir = this.root;
     for (const part of parts.slice(0, -1)) {
       if (!part || part === "." || part === "..") throw Error("无效文件路径");
-      dir = await dir.getDirectoryHandle(part, { create });
+      try {
+        dir = await dir.getDirectoryHandle(part, { create });
+      } catch (error) {
+        // Older exports included invisible title formatting in folderName.
+        // Chromium can reject those names even when just checking existence.
+        // Enumerate the exact legacy name before deciding it is absent; never
+        // sanitize a read path into a different, potentially unrelated folder.
+        if (create || !/\p{Cf}/u.test(part) || !(error instanceof TypeError))
+          throw error;
+        let legacy: FileSystemDirectoryHandle | undefined;
+        for await (const [name, handle] of dir.entries()) {
+          if (name !== part) continue;
+          if (handle.kind !== "directory") throw error;
+          legacy = handle;
+          break;
+        }
+        if (!legacy) throw new DOMException("旧目录不存在", "NotFoundError");
+        dir = legacy;
+      }
     }
     return { dir, name: parts.at(-1)! };
   }
@@ -61,6 +79,9 @@ export class DirectoryFiles implements Files {
       try {
         await this.root.removeEntry(parts[0]);
       } catch (e) {
+        // The migrated file is gone; Chromium may still reject the legacy
+        // directory name during optional empty-directory cleanup.
+        if (e instanceof TypeError && /\p{Cf}/u.test(parts[0])) return;
         if (!(
           e instanceof DOMException && e.name === "InvalidModificationError"
         ))

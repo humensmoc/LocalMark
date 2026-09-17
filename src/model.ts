@@ -141,6 +141,7 @@ export async function pageId(url: string) {
 export function folderName(title: string, id: string) {
   let name =
     title
+      .replace(/\p{Cf}/gu, "")
       .replace(/[\\/:*?"<>|\x00-\x1f]/g, "_")
       .trim()
       .slice(0, 70)
@@ -206,6 +207,7 @@ export function previousMarkdown(p: Page, legacy = false) {
 export function markdownFileName(title: string, suffix = "") {
   let name =
     title
+      .replace(/\p{Cf}/gu, "")
       .replace(/[\\/:*?"<>|\x00-\x1f]/g, "_")
       .trim()
       .slice(0, 170)
