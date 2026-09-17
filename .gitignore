@@ -1,0 +1,8 @@
+node_modules/
+test-results/
+.test-profile/
+测试根目录/
+
+# Extension runtime assets must be tracked despite the Vault-wide image rule.
+!public/icons/*.png
+!dist/icons/*.png

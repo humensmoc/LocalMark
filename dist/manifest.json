@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "本地摘录 · Web Clipper",
+  "description": "在网页上高亮、批注和分类，将每页摘录自动保存到本地 Markdown 与 JSON。",
+  "version": "1.0.8",
+  "minimum_chrome_version": "122",
+  "permissions": ["storage", "unlimitedStorage", "scripting", "alarms"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_title": "打开 / 收起本地摘录",
+    "default_icon": { "16": "icons/16.png", "32": "icons/32.png" }
+  },
+  "options_page": "settings.html",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "css": ["highlights.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

@@ -1,0 +1,25 @@
+::highlight(wc-yellow) {
+  background: #ffe68b;
+  color: #17231f;
+}
+::highlight(wc-green) {
+  background: #8adbad;
+  color: #17231f;
+}
+::highlight(wc-blue) {
+  background: #82c9ff;
+  color: #17231f;
+}
+::highlight(wc-pink) {
+  background: #f3a4c7;
+  color: #17231f;
+}
+::highlight(wc-purple) {
+  background: #c2abf5;
+  color: #17231f;
+}
+::highlight(wc-focus) {
+  background: #ffba38;
+  color: #18211c;
+  text-decoration: underline;
+}
