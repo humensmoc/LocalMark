@@ -1,8 +1,15 @@
 import { build } from "vite";
 import { resolve } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
+const { version } = JSON.parse(await readFile("package.json", "utf8"));
+const manifest = JSON.parse(await readFile("public/manifest.json", "utf8"));
+const lock = JSON.parse(await readFile("package-lock.json", "utf8"));
+if (manifest.version !== version || lock.version !== version || lock.packages[""].version !== version) {
+  throw new Error("请同步 package.json、package-lock.json 和 public/manifest.json 的版本号后再构建。");
+}
 await build({
   configFile: false,
+  define: { __LOCALMARK_VERSION__: JSON.stringify(version) },
   build: {
     outDir: "dist",
     emptyOutDir: true,
@@ -10,6 +17,7 @@ await build({
       preserveEntrySignatures: "strict",
       input: {
         settings: resolve("settings.html"),
+        sidepanel: resolve("sidepanel.html"),
         dashboard: resolve("dashboard.html"),
         background: resolve("src/background.ts"),
         toolbar: resolve("src/toolbar.ts"),
@@ -31,7 +39,10 @@ await writeFile("dist/THIRD_PARTY_NOTICES.txt", notices.join("\n"), "utf8");
 await build({
   configFile: false,
   publicDir: false,
-  define: { "process.env.NODE_ENV": '"production"' },
+  define: {
+    "process.env.NODE_ENV": '"production"',
+    __LOCALMARK_VERSION__: JSON.stringify(version),
+  },
   build: {
     outDir: "dist",
     emptyOutDir: false,

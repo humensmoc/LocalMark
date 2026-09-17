@@ -1,5 +1,25 @@
 # 验证记录
 
+## 0.1.16 Chrome 128 兼容（2026-09-17）
+
+- 最低版本改为128；通过能力检测在新版调用sidePanel.close，在Chrome128侧栏文档内调用window.close，保留原生侧栏与浏览器级Ctrl+B注册。三个版本源同步0.1.16，dist已重建。
+- 使用用户已安装的Chrome128.0.6613.114程序配合全新隔离配置运行13组原生侧栏检查，加载及关闭后重新打开正常，页面视口1384→989→1384；覆盖标签、标题、评论、草稿恢复、SPA选区、高亮编辑、定位、重新绑定、受限页面与仪表盘入口。未使用或修改用户日常浏览器配置。
+- Chrome128不支持现代CDP的Extensions.triggerAction，测试分别核对实际Ctrl+B注册、sidePanel.open和生产关闭按钮；不把API驱动测试表述为实际键盘验证。通过LOCALMARK_CHROME_EXECUTABLE环境变量指定128的chrome.exe，即可复用npm run test:browser。结果见test-results/native-sidepanel-chrome128-results.json。
+- 新Chromium153的13组原生动作回归通过，57项单元测试通过（含新增的旧版关闭、新版关闭和错误传播检查）。
+- 本轮实体按键验证被Computer Use终止：工具无法足够可靠地识别当前浏览器URL以执行策略检查，停止了后续桌面操作。实体Ctrl+B未实测，用户当前扩展是否加载成功仍需重新加载后核对。
+
+
+## 0.1.15 原生侧栏（2026-09-17）
+
+- `npm run build`：TypeScript 与完整 dist 构建；三个版本源同步为 0.1.15，最低 Chrome 141。
+- `npm test`：54 项通过，覆盖页面桥补加载、来源与冲突检查、同步及数据定位回归。
+- `npm run test:browser`：13 组检查通过。当前入口使用 `tests/native-sidepanel-browser.mjs`，通过真实 Chromium 的 `Extensions.triggerAction` 驱动原生扩展动作，独立 CDP 会话检查真实 sidepanel 文档。覆盖未注入旧网页、1384→998 视口让位和关闭恢复、标签/标题/评论保存、关闭后草稿恢复、标签页与 SPA 切换、高亮编辑与定位、重新绑定、pushState 后立即选字的竞态回归、过期 URL 拒绝、受限页提示、原生关闭按钮、窄屏溢出及版本标记。
+- `npm run test:dashboard`：23 组文章管理页回归通过；原覆盖式侧栏的仪表盘入口检查迁移到原生侧栏测试。
+- 快捷键检查读取 Chrome 实际注册结果 `_execute_action = Ctrl+B`；Playwright 的网页键盘事件不代表浏览器级快捷键。桌面实体键盘测试因 Computer Use 窗口归属绑定错误未完成，不能据此声称已测试真实按键或用户当前页面。
+- `tests/browser.mjs`、`tests/tag-browser.mjs` 保留旧覆盖式侧栏的历史用例，其 DOM/键盘假设不适用于原生侧栏，不作为当前入口。数据层、当前原生侧栏与文章管理回归通过以上命令运行。
+- 截图与机器结果位于 `test-results/native-sidepanel*.png`、`native-sidepanel-results.json`。
+
+
 ## 1.0.8 文章管理大窗口（2026-09-16）
 
 - 后续交互调整：管理页整张文章卡片可选择详情，点击空白、分类标签和评论区域均生效；嵌套展开按钮及标题键盘操作保持独立。仪表盘入口移到侧栏底部设置左侧，底栏保持单行。构建、更新后的管理页 18 项检查及侧栏标签专项 4 组通过，查看 390px 侧栏截图，1360/390/320 视口无横向溢出；已同步更新 dist 和 1.0.8 ZIP。
