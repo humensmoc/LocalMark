@@ -14,6 +14,7 @@ import { TagBrowser, type TagFilter } from "./TagBrowser";
 import { PageTags } from "./PageTags";
 import { PageCategory } from "./PageCategory";
 import { PageComment, type CommentDraft } from "./PageComment";
+import { PageRating } from "./PageRating";
 import { PageTitle, type TitleDraft } from "./PageTitle";
 import { SiteIcon } from "./SiteIcon";
 import { Icon } from "./Icon";
@@ -37,6 +38,7 @@ function Dashboard() {
   const [lib, setLib] = useState<Library>(emptyLibrary());
   const [selectedId, setSelectedId] = useState("");
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
+  const [multiSelect, setMultiSelect] = useState(false);
   const [managing, setManaging] = useState<false | "manage" | "create">(false);
   const [view, setView] = useState<LibraryView>("pages");
   const [catalogId, setCatalogId] = useState("");
@@ -166,7 +168,7 @@ function Dashboard() {
   const catalogItem = catalogKind ? catalogItems(lib, catalogKind).find(x => x.id === catalogId) : undefined;
   const aggregate = view === "highlights" || view === "comments";
   const viewInfo = LIBRARY_VIEWS.find(x => x.id === view)!;
-  function changeView(next: LibraryView) { setView(next); setQuery(""); setCatalogId(""); setCheckedIds([]); }
+  function changeView(next: LibraryView) { setView(next); setQuery(""); setCatalogId(""); setCheckedIds([]); setMultiSelect(false); }
   function openSource(p: Page) { setView("pages"); setQuery(""); setFilter({ category: "", tags: [] }); setSelectedId(p.id); }
   const navigation = <LibraryNavigation view={view} lib={lib} change={changeView} />;
   const sidebarFooter = <div className="library-sidebar-footer">本地摘录 <span>v{__LOCALMARK_VERSION__}</span></div>;
@@ -242,8 +244,9 @@ function Dashboard() {
             navigation={navigation}
             sidebarFooter={sidebarFooter}
             taxonomy={lib.taxonomy}
-            selection={{ ids: checkedIds, toggle: id => setCheckedIds(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]) }}
+            selection={multiSelect ? { ids: checkedIds, toggle: id => setCheckedIds(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]) } : undefined}
             selectionControls={<BulkToolbar key={JSON.stringify([query, filter])} lib={lib} selected={checkedIds}
+              active={multiSelect} toggleMode={() => { setMultiSelect(old => !old); setCheckedIds([]); }}
               visible={pages.filter(p => matches(p) && (!filter.category || p.categoryId === filter.category) && filter.tags.every(id => p.tagIds?.includes(id)))}
               select={setCheckedIds} mutate={mutate} />}
             pages={pages}
@@ -295,7 +298,7 @@ function Dashboard() {
               <p>
                 在中间筛选并选择文章。
                 <br />
-                这里可以修改标签、评论和高亮批注。
+                这里可以修改评分、标签、评论和高亮批注。
               </p>
             </div>
           ) : (
@@ -353,6 +356,12 @@ function Dashboard() {
                 </p>
               )}
               <fieldset className="detail-fields" disabled={!!selected.issue}>
+                <PageRating
+                  key={`rating:${page.id}`}
+                  rating={page.rating}
+                  refresh={refresh}
+                  change={(rating) => mutate({ type: "page-rating", ...common, rating, expectedRating: page.rating ?? null })}
+                />
                 <PageCategory
                   key={`category:${page.id}`}
                   category={page.category}

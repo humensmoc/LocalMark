@@ -109,8 +109,8 @@ function Settings() {
       <section>
         <h2>连接你的本地文件夹</h2>
         <p>
-          选择一个用于摘录的专用文件夹，也可以放在 Obsidian Vault 内。每页一个
-          Markdown，原始数据单独保存在 JSON 中。
+          选择一个用于摘录的专用文件夹，也可以放在 Obsidian Vault 内。有高亮、批注或网页评论时才生成
+          Markdown；只有分类和标签时仅保存 JSON 原始数据。
         </p>
         <div className="directory">
           <Icon name="folder" size={25} />

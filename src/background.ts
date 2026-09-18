@@ -8,6 +8,7 @@ import {
   PageSchema,
   PageTagsSchema,
   PageCommentSchema,
+  PageRatingSchema,
   PageCategorySchema,
   DEFAULT_CATEGORY,
   type Library,
@@ -181,7 +182,7 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
     return lib;
   }
   let changedId: string;
-  if (m.type === "save" || m.type === "page-tag" || m.type === "page-comment" || m.type === "page-category" || m.type === "page-title") {
+  if (m.type === "save" || m.type === "page-tag" || m.type === "page-comment" || m.type === "page-category" || m.type === "page-title" || m.type === "page-rating") {
     const dashboard = sender.url === chrome.runtime.getURL("dashboard.html");
     const url = canonicalUrl(m.url);
     if (!/^https?:\/\//.test(url)) throw Error("仅支持 HTTP/HTTPS 网页");
@@ -238,6 +239,13 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
       if (!category) throw Error("主分类已不存在。");
       e.page.categoryId = category.id;
       projectPage(lib, e.page);
+      e.page.updatedAt = now;
+      e.dirty = e.mdDirty = true;
+    } else if (m.type === "page-rating") {
+      if ((e.page.rating ?? null) !== m.expectedRating)
+        throw Error("评分已在其他页面或文件中修改，请读取最新评分后重试。");
+      if (m.rating === null) delete e.page.rating;
+      else e.page.rating = PageRatingSchema.parse(m.rating);
       e.page.updatedAt = now;
       e.dirty = e.mdDirty = true;
     } else if (m.type === "page-comment") {
@@ -337,7 +345,7 @@ async function dispatch(m: Request, sender: chrome.runtime.MessageSender) {
   // Keep dashboard compare-before-edit behavior for fields with expected versions.
   // Tags are set operations and can be saved immediately; the writer checks disk conflicts.
   if (isLibraryUI(sender) &&
-      ["save", "delete", "page-comment", "page-category", "page-title"].includes(m.type)) {
+      ["save", "delete", "page-comment", "page-category", "page-title", "page-rating"].includes(m.type)) {
     const id = m.type === "delete" ? m.pageId : "url" in m ? await pageId(canonicalUrl(m.url)) : "";
     return serialFiles(async () => {
       await sync(new Set([id]));

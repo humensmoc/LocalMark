@@ -102,6 +102,90 @@ async function setup() {
     md: markdownFileName(p.title),
   };
 }
+describe("Markdown content eligibility", () => {
+  it.each([undefined, "", " \n\t "])("saves JSON without Markdown for empty content (%s)", async (comment) => {
+    const { p, e, files, lib, engine, json } = await setup();
+    p.annotations = [];
+    p.comment = comment;
+    await engine.run();
+    expect(files.data.has(json)).toBe(true);
+    expect([...files.data.keys()].some(path => path.endsWith(".md"))).toBe(false);
+    expect(p.markdownFile).toBeUndefined();
+    expect(e.dirty || e.mdDirty || e.issue).toBeFalsy();
+    expect(lib.status).toBe("已保存到本地文件");
+    await engine.run();
+    expect([...files.data.keys()].some(path => path.endsWith(".md"))).toBe(false);
+  });
+
+  it("creates for a description, removes after clearing, and recreates when content returns", async () => {
+    const { p, e, files, engine, json, md } = await setup();
+    const marks = p.annotations;
+    p.annotations = [];
+    await engine.run();
+    p.comment = "网页描述";
+    e.dirty = e.mdDirty = true;
+    await engine.run();
+    expect(files.data.get(md)).toContain("网页描述");
+    p.comment = "  ";
+    e.dirty = e.mdDirty = true;
+    await engine.run();
+    expect(files.data.has(md)).toBe(false);
+    expect(files.data.has(json)).toBe(true);
+    expect(e.baseMd).toBeNull();
+    p.annotations = marks.map(m => ({ ...m, note: "" }));
+    e.dirty = e.mdDirty = true;
+    await engine.run();
+    expect(files.data.get(md)).toContain("hello world");
+    expect(e.issue).toBeUndefined();
+  });
+
+  it.each([false, true])("cleans untouched empty exports on first import (legacy=%s)", async (legacy) => {
+    const { p, files, json, md } = await setup();
+    p.annotations = [];
+    if (!legacy) p.markdownFile = md;
+    const path = legacy ? `${p.folderName}/标注.md` : md;
+    files.data.set(json, JSON.stringify(p));
+    files.data.set(path, legacy ? previousMarkdown(p) : markdown(p));
+    const lib = emptyLibrary();
+    await new SyncEngine(lib, files, async () => {}).run();
+    expect(files.data.has(path)).toBe(false);
+    expect(files.data.has(json)).toBe(true);
+    expect(lib.entries[p.id].issue).toBeUndefined();
+  });
+
+  it("preserves manual edits when the last highlight is removed, with backup on resolution", async () => {
+    const { p, e, files, engine, md } = await setup();
+    await engine.run();
+    files.data.set(md, "手工笔记");
+    p.annotations = [];
+    e.dirty = e.mdDirty = true;
+    await engine.run();
+    expect(e.issue?.kind).toBe("markdown");
+    expect(files.data.get(md)).toBe("手工笔记");
+    await engine.resolve(p.id, "local");
+    expect(files.data.has(md)).toBe(false);
+    expect([...files.data.entries()].some(([path, value]) => path.startsWith("冲突备份/") && value === "手工笔记")).toBe(true);
+    expect(e.issue).toBeUndefined();
+  });
+
+  it("retries failed removal without losing the JSON checkpoint", async () => {
+    const { p, e, files, engine, md, json } = await setup();
+    await engine.run();
+    p.annotations = [];
+    e.dirty = e.mdDirty = true;
+    const remove = files.remove.bind(files);
+    files.remove = async () => { throw Error("permission denied"); };
+    await engine.run();
+    expect(e.issue?.kind).toBe("io");
+    expect(JSON.parse(files.data.get(json)!).annotations).toEqual([]);
+    expect(files.data.has(md)).toBe(true);
+    files.remove = remove;
+    await engine.run();
+    expect(files.data.has(md)).toBe(false);
+    expect(e.issue).toBeUndefined();
+  });
+});
+
 describe("identity and export", () => {
   it("migrates old pages to one category and preserves all existing small tags", async () => {
     const p = await fixture();
@@ -212,8 +296,8 @@ describe("identity and export", () => {
     e.dirty = true;
     await engine.run();
     expect(JSON.parse(files.data.get(json)!).comment).toBe("");
-    expect(files.data.get(md)).not.toContain("## 网页评论");
-    expect(files.data.get(md)).toContain('tags:\n  - "设计"');
+    expect(files.data.has(md)).toBe(false);
+    expect(JSON.parse(files.data.get(json)!).tags).toEqual(["设计"]);
   });
   it("accepts old JSON without a comment and rejects malformed comments", async () => {
     const p = await fixture();

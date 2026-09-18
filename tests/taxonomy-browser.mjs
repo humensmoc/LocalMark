@@ -190,7 +190,34 @@ try {
     const response = await rpc(page, { type: "snapshot", refresh });
     assert.equal(response.ok, true, response.error); return response.data;
   };
-  await page.getByRole("checkbox", { name: "选择文章：Idle 游戏分类学", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Idle 游戏分类学", exact: true }).waitFor();
+  const modeToolbar = page.getByLabel("批量整理", { exact: true });
+  assert.equal(await page.locator(".article-checkbox").count(), 0);
+  assert.equal(await modeToolbar.getByText(/已选/).count(), 0);
+  assert.equal(await modeToolbar.getByRole("button", { name: /全选当前/ }).count(), 0);
+  await page.screenshot({ path: join(out, "selection-default-wide.png"), fullPage: true });
+  for (const width of [1440, 320]) {
+    await page.setViewportSize({ width, height: 960 });
+    const toolbarBox = await modeToolbar.boundingBox();
+    const buttonBox = await modeToolbar.getByRole("button", { name: "多选", exact: true }).boundingBox();
+    assert.ok(Math.abs(toolbarBox.x + toolbarBox.width - buttonBox.x - buttonBox.width - 12) <= 2);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  }
+  await page.screenshot({ path: join(out, "selection-default-320.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await modeToolbar.getByRole("button", { name: "多选", exact: true }).click();
+  await modeToolbar.getByText("已选 0 篇", { exact: true }).waitFor();
+  await page.getByRole("checkbox", { name: "选择文章：Idle 游戏分类学", exact: true }).check();
+  await modeToolbar.getByText("已选 1 篇", { exact: true }).waitFor();
+  await modeToolbar.getByRole("button", { name: "添加标签", exact: true }).click();
+  await modeToolbar.getByRole("button", { name: "退出多选", exact: true }).click();
+  assert.equal(await page.locator(".article-checkbox").count(), 0);
+  assert.equal(await modeToolbar.locator("fieldset").count(), 0);
+  assert.equal(await modeToolbar.getByText(/已选/).count(), 0);
+  await modeToolbar.getByRole("button", { name: "多选", exact: true }).click();
+  await modeToolbar.getByText("已选 0 篇", { exact: true }).waitFor();
+  assert.equal(await page.locator(".article-checkbox input:checked").count(), 0);
+  ok("selection is opt-in, toggle stays right aligned, and exiting clears selection and editor");
   const original = await snapshot(true);
   assert.ok(Object.values(original.entries).every(e => e.page.schemaVersion === 2));
   const catId = original.entries[seeded[0]].page.categoryId;
@@ -301,6 +328,8 @@ try {
   }
   await dialog.getByRole("button", { name: "关闭管理" }).click();
   await page.setViewportSize({ width: 1440, height: 960 });
+  assert.equal(await page.locator(".article-checkbox").count(), 0);
+  await bulk.getByRole("button", { name: "多选", exact: true }).click();
   await bulk.getByRole("button", { name: "全选当前筛选结果（4 篇）", exact: true }).click();
   await bulk.getByRole("button", { name: "添加标签", exact: true }).click();
   await page.screenshot({ path: join(out, "taxonomy-bulk-wide.png"), fullPage: true });

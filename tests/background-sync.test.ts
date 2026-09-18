@@ -51,6 +51,8 @@ const tag = (name: string) =>
     action: "add",
   });
 const tick = () => vi.advanceTimersByTimeAsync(100);
+const rate = (rating: number | null, expectedRating: number | null) =>
+  send({ type: "page-rating", url: page.url, title: page.title, favicon: "", rating, expectedRating });
 
 beforeEach(async () => {
   vi.resetModules();
@@ -136,6 +138,59 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("persists ratings without highlights and restores them from disk", async () => {
+  const result = await rate(4, null);
+  expect(result.ok).toBe(true);
+  expect(saved().entries[page.id].page.rating).toBe(4);
+  await tick();
+  await vi.waitFor(() => expect(saved().entries[page.id].dirty).toBe(false));
+  expect(JSON.parse(data.get(`原始数据/${page.id}.json`)!).rating).toBe(4);
+  const snapshot = await send({ type: "snapshot", refresh: true });
+  expect(snapshot.data.entries[page.id].page.rating).toBe(4);
+  expect(snapshot.data.entries[page.id].page.annotations).toHaveLength(0);
+});
+
+it("rejects stale ratings and supports clearing without changing other page fields", async () => {
+  await rate(2, null);
+  expect((await rate(5, null)).ok).toBe(false);
+  expect(saved().entries[page.id].page.rating).toBe(2);
+  const cleared = await rate(null, 2);
+  expect(cleared.ok).toBe(true);
+  expect(cleared.data.entries[page.id].page.rating).toBeUndefined();
+  expect(cleared.data.entries[page.id].page.title).toBe(page.title);
+  expect(cleared.data.entries[page.id].page.category).toBe(page.category);
+  await tick();
+  await vi.waitFor(() => expect(saved().entries[page.id].dirty).toBe(false));
+  expect(JSON.parse(data.get(`原始数据/${page.id}.json`)!).rating).toBeUndefined();
+});
+
+it("rejects ratings outside the five integer star levels without persisting", async () => {
+  for (const value of [0, -1, 6, 2.5, NaN, "3", undefined]) {
+    expect((await rate(value as number, null)).ok).toBe(false);
+    expect(saved().entries[page.id].page.rating).toBeUndefined();
+  }
+  expect(writes).toHaveLength(0);
+});
+
+it("exports ratings to existing Markdown and protects external rating edits", async () => {
+  const comment = await send({ type: "page-comment", url: page.url, title: page.title, favicon: "", comment: "Review", expectedComment: "" });
+  expect(comment.ok).toBe(true);
+  await rate(5, null);
+  await tick();
+  await vi.waitFor(() => expect(saved().entries[page.id].mdDirty).toBe(false));
+  expect(data.get("Article.md")).toContain("rating: 5\n");
+  const disk = JSON.parse(data.get(`原始数据/${page.id}.json`)!);
+  disk.rating = 3;
+  disk.updatedAt = "2026-09-18T01:00:00.000Z";
+  data.set(`原始数据/${page.id}.json`, JSON.stringify(disk));
+  const response = await new Promise<any>(reply => harness.listener!(
+    { type: "page-rating", url: page.url, title: page.title, favicon: "", rating: 1, expectedRating: 5 },
+    { id: "extension", url: "chrome-extension://extension/dashboard.html" }, reply));
+  expect(response.ok).toBe(false);
+  expect(response.error).toContain("评分");
+  expect(saved().entries[page.id].page.rating).toBe(3);
+});
+
 it("acknowledges durable tags before disk writes and coalesces a burst", async () => {
   const a = await tag("A"),
     b = await tag("B");
@@ -145,7 +200,8 @@ it("acknowledges durable tags before disk writes and coalesces a burst", async (
   expect(writes).toHaveLength(0);
   await tick();
   await vi.waitFor(() => expect(saved().status).toBe("已保存到本地文件"));
-  expect(writes.filter(path => path !== "分类标签.json")).toHaveLength(2);
+  expect(writes.filter(path => path !== "分类标签.json")).toEqual([`原始数据/${page.id}.json`]);
+  expect(data.has("Article.md")).toBe(false);
   expect(saved().status).toBe("已保存到本地文件");
 });
 

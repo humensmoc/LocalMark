@@ -8,6 +8,7 @@ export const COLORS = {
 } as const;
 export type Color = keyof typeof COLORS;
 export const PageCommentSchema = z.string().max(100000);
+export const PageRatingSchema = z.number().int().min(1).max(5);
 export const DEFAULT_CATEGORY = "未分类";
 export const DEFAULT_CATEGORIES = [DEFAULT_CATEGORY, "游戏设计", "交互设计", "视觉设计", "游戏营销", "游戏分析", "访谈"];
 export const PageCategorySchema = z.string().trim().min(1).max(100);
@@ -70,6 +71,7 @@ export const PageSchema = z
     tagIds: z.array(z.string().min(1)).max(500).optional(),
     categoryId: z.string().min(1).optional(),
     comment: PageCommentSchema.optional(),
+    rating: PageRatingSchema.optional(),
     category: PageCategorySchema.default(DEFAULT_CATEGORY),
     markdownFile: z
       .string()
@@ -259,7 +261,8 @@ export function markdown(p: Page) {
   const tags = p.tags?.length
     ? "tags:\n" + p.tags.map((tag) => `  - ${JSON.stringify(tag)}\n`).join("")
     : "tags: []\n";
-  const header = `---\ncreated: ${p.createdAt}\nupdated: ${p.updatedAt}\ncategory: ${JSON.stringify(p.category ?? DEFAULT_CATEGORY)}\n${tags}source: ${JSON.stringify(p.url)}\n---\n\n`;
+  const rating = p.rating === undefined ? "" : `rating: ${p.rating}\n`;
+  const header = `---\ncreated: ${p.createdAt}\nupdated: ${p.updatedAt}\ncategory: ${JSON.stringify(p.category ?? DEFAULT_CATEGORY)}\n${tags}${rating}source: ${JSON.stringify(p.url)}\n---\n\n`;
   const comment = p.comment?.trim()
     ? "## 网页评论\n\n" + p.comment.split("\n").map(md).join("  \n") + "\n\n"
     : "";

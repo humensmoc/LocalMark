@@ -219,6 +219,25 @@ try {
     0,
   );
   ok("selecting an article opens its detail without navigating to its website");
+  const originalCardHeight = (await firstCard.boundingBox()).height;
+  await detail.getByRole("button", { name: "3 星", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".dashboard-detail .rating-value")?.textContent === "3 / 5");
+  assert.equal(await firstCard.locator(".rating-dots .filled").count(), 3);
+  assert.equal((await firstCard.boundingBox()).height, originalCardHeight);
+  await page.screenshot({ path: join(out, "rating-dashboard.png"), fullPage: true });
+  await page.reload();
+  await firstCard.getByRole("button", { name: first, exact: true }).click();
+  await detail.getByRole("button", { name: "3 星", exact: true }).waitFor();
+  assert.equal(await detail.getByRole("button", { name: "3 星", exact: true }).getAttribute("aria-pressed"), "true");
+  await detail.getByRole("button", { name: "4 星", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.querySelector(".dashboard-detail .rating-value")?.textContent === "4 / 5");
+  assert.equal(await firstCard.locator(".rating-dots .filled").count(), 4);
+  await detail.locator(".rating-clear").click();
+  await page.waitForFunction(() => document.querySelector(".dashboard-detail .rating-value")?.textContent === "未评分");
+  assert.equal(await firstCard.locator(".rating-dots i").count(), 5);
+  assert.equal(await firstCard.locator(".rating-dots .filled").count(), 0);
+  ok("dashboard edits ratings by mouse and keyboard, preserves card height, reloads ratings and clears to five hollow dots");
   const bounds = await page
     .locator(".library-rail, .tag-results, .dashboard-detail")
     .evaluateAll((nodes) =>
@@ -293,9 +312,11 @@ try {
   assert.equal(await detail.locator(".mark-preview blockquote").textContent(), "玩家需要清晰的目标和及时的反馈。");
   const compact = await detail.evaluate((node) => {
     const first = node.querySelector(".mark-editor").getBoundingClientRect();
-    return { top: first.top - node.getBoundingClientRect().top, height: first.height };
+    const rating = node.querySelector(".page-rating");
+    return { top: first.top - node.getBoundingClientRect().top, height: first.height,
+      ratingHeight: rating.getBoundingClientRect().height + parseFloat(getComputedStyle(rating).marginBottom) };
   });
-  assert.ok(compact.top < 320, `detail heading and metadata should be compact: ${JSON.stringify(compact)}`);
+  assert.ok(compact.ratingHeight <= 38 && compact.top - compact.ratingHeight < 320, `detail remains compact with one rating row: ${JSON.stringify(compact)}`);
   assert.ok(compact.height < 120, `read-only highlight should be compact: ${JSON.stringify(compact)}`);
   ok("default highlight view contains text, note and edit button without form or color controls");
   await page.screenshot({

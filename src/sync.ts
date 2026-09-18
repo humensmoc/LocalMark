@@ -196,7 +196,8 @@ export class SyncEngine {
       if (e.issue && e.issue.kind !== "io" && e.issue.kind !== "markdown")
         continue;
       try {
-        if (!e.page.markdownFile) {
+        const needsMarkdown = e.page.annotations.length > 0 || !!e.page.comment?.trim();
+        if (needsMarkdown && !e.page.markdownFile) {
           const oldPath = mdPath(e);
           const old = await this.files.read(oldPath);
           if (
@@ -255,7 +256,7 @@ export class SyncEngine {
           await this.persist();
         }
         // Check even clean Markdown on refresh, so manual edits cannot be silently adopted.
-        const intended = markdown(e.page),
+        const intended = needsMarkdown ? markdown(e.page) : null,
           current = await this.files.read(mdPath(e));
         if (current !== null && current !== e.baseMd && !isGeneratedMarkdown(current, e.page)) {
           e.issue = {
@@ -265,7 +266,10 @@ export class SyncEngine {
           };
           continue;
         }
-        if (current !== intended) await this.files.write(mdPath(e), intended);
+        if (current !== intended) {
+          if (intended === null) await this.files.remove(mdPath(e));
+          else await this.files.write(mdPath(e), intended);
+        }
         e.baseMd = intended;
         e.mdDirty = false;
         delete e.issue;

@@ -20,6 +20,7 @@ import { PageCategory } from "./PageCategory";
 import { PageComment, type CommentDraft } from "./PageComment";
 import { PageTitle, type TitleDraft } from "./PageTitle";
 import { SiteIcon } from "./SiteIcon";
+import { PageRating, RatingDots } from "./PageRating";
 import { ensurePageBridge } from "./toolbar";
 import type { PageInfo } from "./page-bridge";
 import "./ui.css";
@@ -349,7 +350,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                         >
                           {p.title}
                         </button>
-                        <div className="url">{p.url}</div>
+                        <div className="rated-url"><div className="url">{p.url}</div><RatingDots rating={p.rating} /></div>
                       </div>
                     </div>
                     {p.comment?.trim() && (
@@ -437,6 +438,17 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                   }}
                 />
                 <div className="url">{url}</div>
+                <PageRating
+                  key={`rating:${url}`}
+                  rating={current?.rating}
+                  refresh={() => load(true)}
+                  change={async (rating) => {
+                    const next = await request({ type: "page-rating", url, title: page?.title ?? "", favicon: page?.favicon ?? "",
+                      rating, expectedRating: current?.rating ?? null });
+                    setLib(next);
+                    tell(next.status);
+                  }}
+                />
                 <PageCategory
                   key={`category:${url}`}
                   category={current?.category ?? DEFAULT_CATEGORY}
@@ -530,7 +542,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
               {!current?.annotations.length && (
                 <div className="empty">
                   <Icon name="pen" size={30} />
-                  <p>可以只添加网页标签或评论。</p>
+                  <p>可以只给网页评分、添加标签或评论。</p>
                   <small>需要摘录时，选中网页文字即可高亮。</small>
                   <small>悬停高亮按钮可以添加批注。</small>
                 </div>

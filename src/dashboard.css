@@ -536,6 +536,9 @@ body {
 /* Library-wide management and explicit selected-page operations. */
 .bulk-toolbar { grid-column: 3; grid-row: 1; padding: 12px; border-bottom: 1px solid #354053; min-width: 0; max-height: 42vh; overflow: auto; flex-shrink: 0; }
 .bulk-toolbar .row { margin-bottom: 6px; }
+.bulk-toolbar .bulk-toolbar-heading { flex-wrap: nowrap; align-items: flex-start; margin-bottom: 0; }
+.bulk-toolbar .bulk-selection-summary { flex: 1; min-width: 0; }
+.bulk-toolbar .bulk-mode-toggle { margin-left: auto; flex-shrink: 0; white-space: nowrap; }
 .bulk-toolbar button { white-space: normal; text-align: left; }
 .bulk-toolbar fieldset, .taxonomy-dialog fieldset { border: 0; padding: 0; margin: 10px 0; min-width: 0; }
 .bulk-options { display: flex; flex-wrap: wrap; gap: 8px; max-height: 150px; overflow: auto; margin: 8px 0; }

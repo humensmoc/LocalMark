@@ -10,6 +10,7 @@ export type Mutation = {
   anchor: Anchor;
 };
 export type Request =
+  | { type: "page-rating"; url: string; title: string; favicon: string; rating: number | null; expectedRating: number | null }
   | { type: "taxonomy"; action: TaxonomyAction; expected: string }
   | { type: "bulk-taxonomy"; selected: Record<string, string>; action: BulkAction; expected: string }
   | { type: "resolve-taxonomy"; choice: "local" | "disk" }

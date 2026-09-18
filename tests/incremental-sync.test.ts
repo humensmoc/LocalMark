@@ -29,6 +29,7 @@ export async function fixture(count = 1) {
       createdAt: "2026-09-17T01:00:00.000Z",
       updatedAt: "2026-09-17T01:00:00.000Z",
       annotations: [],
+      comment: "网页说明",
       tags: [],
       category: "未分类",
     };

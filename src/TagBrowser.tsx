@@ -7,6 +7,7 @@ import {
 } from "react";
 import type { Mark, Page, Taxonomy } from "./model";
 import { SiteIcon } from "./SiteIcon";
+import { RatingDots } from "./PageRating";
 
 export type TagFilter = { category: string; tags: string[] };
 
@@ -207,6 +208,7 @@ export function TagBrowser({
               {p.title}
             </button>
             </div>
+            <RatingDots rating={p.rating} />
             <div className="result-taxonomy">
               <span className="result-category">{p.category}</span>
               {p.tags.map((t) => (

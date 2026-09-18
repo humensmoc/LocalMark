@@ -2,6 +2,7 @@ import { useState, type CSSProperties } from "react";
 import { COLORS, type Color, type Library, type Page, type Mark } from "./model";
 import { Icon } from "./Icon";
 import { SiteIcon } from "./SiteIcon";
+import { RatingDots } from "./PageRating";
 import { taxonomyToken, UNCATEGORIZED } from "./taxonomy";
 import type { Request } from "./protocol";
 
@@ -63,7 +64,7 @@ export function CatalogGrid({ lib, kind, query, selected, choose, manage }: {
 
 function Source({ page, open }: { page: Page; open: (p: Page) => void }) {
   return <button className="content-source" onClick={() => open(page)} title={`查看网页：${page.title}`}>
-    <SiteIcon site={page} /><span>{page.title}<small>{new URL(page.url).hostname}</small></span><Icon name="arrow" size={14} />
+    <SiteIcon site={page} /><span>{page.title}<small className="rated-source-meta"><span className="source-host">{new URL(page.url).hostname}</span><RatingDots rating={page.rating} /></small></span><Icon name="arrow" size={14} />
   </button>;
 }
 export function HighlightCard({ page, mark, open }: { page: Page; mark: Mark; open: (p: Page) => void }) {

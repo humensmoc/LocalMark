@@ -289,6 +289,37 @@ try {
   await until(() => panel.evaluate(() => [...document.querySelectorAll(".page-head .site-icon img, .page-head .site-backdrop img")].length === 2 && [...document.querySelectorAll(".page-head img")].every(img => img.complete && img.naturalWidth > 0)), "current page icon and backdrop loaded");
   ok("current page shows its site icon and frosted backdrop");
   await page.screenshot({ path: join(out, "native-page-resized.png") });
+  const ratingColors = new Set();
+  for (let rating = 1; rating <= 5; rating++) {
+    await panel.click(`.rating-stars button[aria-label="${rating} 星"]`);
+    await until(async () => (await entry("/first"))?.page.rating === rating, "rating saved");
+    await until(() => panel.evaluate(() => !document.querySelector(".rating-stars button").disabled), "rating idle");
+    await panel.textClick("最近网页");
+    await until(() => panel.evaluate(n => document.querySelectorAll(".card .rating-dots .filled").length === n, rating), "recent rating");
+    ratingColors.add(await panel.evaluate(() => getComputedStyle(document.querySelector(".rating-dots")).color));
+    assert.equal(await panel.evaluate(() => document.querySelectorAll(".card .rating-dots i").length), 5);
+    const geometry = await panel.evaluate(() => {
+      const card = document.querySelector(".card");
+      const height = card.getBoundingClientRect().height;
+      const dots = card.querySelector(".rating-dots");
+      dots.style.display = "none";
+      const without = card.getBoundingClientRect().height;
+      dots.style.display = "";
+      return { height, without, overflow: document.documentElement.scrollWidth > innerWidth };
+    });
+    assert.equal(geometry.height, geometry.without);
+    assert.equal(geometry.overflow, false);
+    if (rating === 5) await panel.screenshot("rating-recent.png");
+    await panel.textClick("标签");
+    await until(() => panel.evaluate(n => document.querySelectorAll(".result-card .rating-dots .filled").length === n, rating), "tag rating");
+    if (rating === 5) await panel.screenshot("rating-tags.png");
+    await panel.textClick("当前页面");
+  }
+  assert.equal(ratingColors.size, 5);
+  await panel.screenshot("rating-current.png");
+  await panel.click(".rating-clear");
+  await until(async () => (await entry("/first"))?.page.rating === undefined, "rating cleared");
+  ok("current page independently saves and clears 1–5 stars; recent/tag cards show five dots with distinct colors and unchanged recent card height");
   await panel.click('[aria-label="添加网页标签"]');
   await panel.fill('[aria-label="搜索或新建网页标签"]', "原生侧栏测试");
   await panel.click(".create-tag");

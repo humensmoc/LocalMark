@@ -54,7 +54,7 @@ async function pendingPage() {
     schemaVersion: 1, id, url, originalUrl: url, title, favicon: "",
     folderName: `${title}--${id}`, tags: ["设计方法论"], category: "游戏分析",
     createdAt: "2026-09-17T01:00:00.000Z", updatedAt: "2026-09-17T01:00:00.000Z",
-    annotations: [],
+    annotations: [], comment: "记录反馈表的使用说明",
   };
   const lib = emptyLibrary();
   lib.entries[id] = { page, baseJson: null, baseMd: null, dirty: true, mdDirty: true,
