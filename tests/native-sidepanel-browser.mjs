@@ -73,6 +73,25 @@ try {
     context.serviceWorkers()[0] ??
     (await context.waitForEvent("serviceworker"));
   const extId = new URL(worker.url()).host;
+  const downloadDir = join(out, "metadata-downloads");
+  await mkdir(downloadDir, { recursive: true });
+  await cdp.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: downloadDir, eventsEnabled: true });
+  async function downloadCurrentMetadata(expected) {
+    let started, complete;
+    const begin = event => { started = event; };
+    const progress = event => { if (event.state === "completed") complete = event; };
+    cdp.on("Browser.downloadWillBegin", begin);
+    cdp.on("Browser.downloadProgress", progress);
+    try {
+      await panel.click(".metadata-download");
+      await until(() => started && complete?.guid === started.guid, "JSON browser download");
+      assert.ok(started.suggestedFilename.endsWith(`--${expected.id}.json`));
+      assert.deepEqual(JSON.parse(await readFile(join(downloadDir, started.guid), "utf8")), expected);
+    } finally {
+      cdp.off("Browser.downloadWillBegin", begin);
+      cdp.off("Browser.downloadProgress", progress);
+    }
+  }
   let controller;
   if (executablePath) {
     // Simulate a tab lacking a live content script, without modern loadUnpacked.
@@ -286,6 +305,8 @@ try {
     "LocalMark Native QA /first",
   );
   await panel.screenshot("native-sidepanel.png");
+  assert.equal(await panel.evaluate(() => document.querySelector(".metadata-open")?.disabled), true);
+  assert.match(await panel.evaluate(() => document.querySelector(".page-metadata-location").textContent), /保存评分、标签或评论/);
   await until(() => panel.evaluate(() => [...document.querySelectorAll(".page-head .site-icon img, .page-head .site-backdrop img")].length === 2 && [...document.querySelectorAll(".page-head img")].every(img => img.complete && img.naturalWidth > 0)), "current page icon and backdrop loaded");
   ok("current page shows its site icon and frosted backdrop");
   await page.screenshot({ path: join(out, "native-page-resized.png") });
@@ -317,6 +338,11 @@ try {
   }
   assert.equal(ratingColors.size, 5);
   await panel.screenshot("rating-current.png");
+  await until(() => panel.evaluate(() => document.querySelector(".page-metadata-location").textContent.includes("连接本地文件夹")), "metadata folder guidance");
+  assert.equal(await panel.evaluate(() => document.querySelector(".metadata-open").disabled), true);
+  ok("metadata location stays visible with useful guidance for unsaved pages and disconnected folders");
+  await downloadCurrentMetadata((await entry("/first")).page);
+  ok("browser downloads the current JSON before any local directory is connected");
   await panel.click(".rating-clear");
   await until(async () => (await entry("/first"))?.page.rating === undefined, "rating cleared");
   ok("current page independently saves and clears 1–5 stars; recent/tag cards show five dots with distinct colors and unchanged recent card height");
@@ -663,6 +689,93 @@ try {
   ok(
     "browser action close restores page width and the next action opens correctly",
   );
+  // Isolated OPFS exercises real handle resolution and disk synchronization.
+  // Only the OS picker and clipboard boundary are intercepted; a native Windows
+  // dialog's initial folder still needs manual verification on a real directory.
+  await panel.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("LocalMark QA", { create: true });
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("local-web-clipper", 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").put(root, "pendingRoot");
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    const reply = await chrome.runtime.sendMessage({ type: "directory-connected" });
+    if (!reply.ok) throw Error(reply.error);
+    window.__metadataPickerOriginal = window.showOpenFilePicker;
+    window.__metadataCalls = [];
+    window.showOpenFilePicker = async options => {
+      window.__metadataCalls.push({ name: options.startIn.name, kind: options.startIn.kind,
+        active: navigator.userActivation.isActive, text: await (await options.startIn.getFile()).text() });
+      throw new DOMException("cancelled", "AbortError");
+    };
+    window.__metadataClipboardOriginal = navigator.clipboard.writeText;
+    navigator.clipboard.writeText = async value => { window.__metadataCopied = value; };
+  });
+  await until(() => panel.evaluate(() => document.querySelector(".metadata-open")?.disabled === false), "metadata file synced");
+  const metadataPath = new URL(page.url()).pathname;
+  const metadataEntry = await entry(metadataPath);
+  assert.ok(metadataEntry);
+  const migratedNames = await panel.evaluate(async id => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("LocalMark QA");
+    async function find(dir, prefix = "data") {
+      const matches = [];
+      for await (const [name, handle] of dir.entries()) {
+        if (handle.kind === "directory") matches.push(...await find(handle, `${prefix}/${name}`));
+        else if (name.endsWith(`--${id}.json`)) matches.push({ file: handle, dir, path: `${prefix}/${name}` });
+      }
+      return matches;
+    }
+    const matches = await find(await root.getDirectoryHandle("data"));
+    if (matches.length !== 1) throw Error("Expected one named metadata file");
+    const old = matches[0];
+    const raw = await (await old.file.getFile()).text();
+    const legacy = await root.getDirectoryHandle("原始数据", { create: true });
+    const writer = await (await legacy.getFileHandle(`${id}.json`, { create: true })).createWritable();
+    await writer.write(raw);
+    await writer.close();
+    await old.dir.removeEntry(old.file.name);
+    const reply = await chrome.runtime.sendMessage({ type: "snapshot", refresh: true });
+    if (!reply.ok) throw Error(reply.error);
+    const result = await find(await root.getDirectoryHandle("data"));
+    for (const item of result) {
+      if (await (await item.file.getFile()).text() !== raw) throw Error("Migration changed article bytes");
+      if (!/^data\/\d{4}-\d{2}\/\d{2}\//.test(item.path)) throw Error("Missing date folders");
+    }
+    try { await root.getDirectoryHandle("原始数据"); throw Error("Old directory remains"); }
+    catch (error) { if (error.name !== "NotFoundError") throw error; }
+    return result.map(item => item.file.name);
+  }, metadataEntry.page.id);
+  assert.deepEqual(migratedNames, [`${metadataEntry.page.title}--${metadataEntry.page.id}.json`]);
+  await until(() => panel.evaluate(() => !document.querySelector(".metadata-open").disabled), "metadata migration refresh");
+  ok("old ID-only JSON migrates to a readable title filename with identical bytes in real OPFS");
+  await panel.click(".metadata-open");
+  await until(() => panel.evaluate(() => window.__metadataCalls.length === 1 && !document.querySelector(".metadata-open").disabled), "metadata picker cancelled");
+  const pickerCall = await panel.evaluate(() => window.__metadataCalls[0]);
+  assert.equal(pickerCall.name, `${metadataEntry.page.title}--${metadataEntry.page.id}.json`);
+  assert.equal(pickerCall.kind, "file");
+  assert.equal(pickerCall.active, true);
+  assert.equal(JSON.parse(pickerCall.text).url, page.url());
+  assert.equal(await panel.evaluate(() => document.querySelector(".page-metadata-location [role=status]")?.textContent ?? ""), "");
+  await panel.click(".metadata-copy");
+  assert.equal(await panel.evaluate(() => window.__metadataCopied), pickerCall.name);
+  assert.equal(await panel.evaluate(() => document.querySelector(".metadata-filename").textContent), pickerCall.name);
+  assert.deepEqual((await entry(metadataPath)).page, metadataEntry.page);
+  await downloadCurrentMetadata(metadataEntry.page);
+  ok("downloaded JSON matches the active article stored in its month/day directory");
+  await panel.click(".toast");
+  await panel.screenshot("metadata-location.png");
+  await panel.evaluate(() => {
+    window.showOpenFilePicker = window.__metadataPickerOriginal;
+    navigator.clipboard.writeText = window.__metadataClipboardOriginal;
+  });
+  ok("metadata button resolves the active article's real JSON handle, retains user activation, copies its filename and cancels without modifying article data (OS picker intercepted)");
   const { windowId } = await pageCDP.send("Browser.getWindowForTarget");
   await cdp.send("Browser.setWindowBounds", {
     windowId,
@@ -718,6 +831,33 @@ try {
   await dashboard.close();
   await page.bringToFront();
   ok("native footer management entry opens and reuses the dashboard window");
+  await panel.evaluate(base => {
+    const transfer = new DataTransfer();
+    for (const [id, title] of [["5555555555555555", "侧栏拖入一"], ["6666666666666666", "侧栏拖入二"]]) {
+      const source = { schemaVersion: 2, id, title, url: base + "/" + id, originalUrl: base + "/" + id,
+        favicon: "", folderName: title + "--" + id, createdAt: "2024-12-05T02:00:00.000Z", updatedAt: "2026-09-20T02:00:00.000Z",
+        category: "侧栏导入分类", categoryId: "foreign-category", tags: ["侧栏导入标签"], tagIds: ["foreign-tag"], annotations: [], comment: "来自拖放" };
+      transfer.items.add(new File([JSON.stringify(source)], title + ".json", { type: "application/json" }));
+    }
+    const target = document.querySelector(".panel");
+    target.dispatchEvent(new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  }, base);
+  await until(() => panel.evaluate(() => document.querySelector(".metadata-import-summary")?.textContent === "已导入 2 · 待同步 0 · 已跳过 0 · 失败 0"), "native sidebar import");
+  await panel.screenshot("import-native-result.png");
+  await panel.click(".metadata-import-report header button");
+  await until(() => panel.evaluate(() => document.querySelector(".tabs button.active")?.textContent.includes("最近网页")), "imported recent list");
+  const imported = await entry("/5555555555555555");
+  assert.equal(imported.page.comment, "来自拖放");
+  assert.equal(imported.page.category, "侧栏导入分类");
+  assert.deepEqual(imported.page.tags, ["侧栏导入标签"]);
+  const storedImport = await panel.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("LocalMark QA");
+    const dir = await (await (await root.getDirectoryHandle("data")).getDirectoryHandle("2024-12")).getDirectoryHandle("05");
+    return JSON.parse(await (await (await dir.getFileHandle("侧栏拖入一--5555555555555555.json")).getFile()).text());
+  });
+  assert.deepEqual(storedImport, imported.page);
+  ok("native sidebar accepts multiple dropped JSON files, writes dated metadata, and shows the imported records");
   if (process.env.LOCALMARK_INTERACTIVE_QA === "1") {
     await panel.detach();
     await toggle(page);

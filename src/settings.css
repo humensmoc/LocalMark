@@ -77,6 +77,65 @@ section {
 .status {
   font-size: 13px;
 }
+.markdown-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #3a4c5d;
+  border-radius: 9px;
+}
+.markdown-setting label {
+  font-weight: 600;
+  cursor: pointer;
+}
+.markdown-setting p {
+  font-size: 12px;
+}
+.setting-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #a7b5c6;
+}
+.setting-switch {
+  appearance: none;
+  width: 44px;
+  height: 26px;
+  margin: 0;
+  padding: 3px;
+  border: 1px solid #627086;
+  border-radius: 20px;
+  background: #263141;
+  cursor: pointer;
+}
+.setting-switch::before {
+  content: "";
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #e5edf6;
+}
+.setting-switch:checked {
+  background: #27a681;
+  border-color: #27a681;
+}
+.setting-switch:checked::before {
+  transform: translateX(18px);
+}
+.setting-switch:focus-visible {
+  outline: 2px solid #72e0bc;
+  outline-offset: 3px;
+}
+.setting-switch:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
 .actions {
   display: flex;
   align-items: center;
@@ -184,6 +243,11 @@ article {
   justify-content: space-between;
 }
 @media (max-width: 600px) {
+  .markdown-setting {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
   main {
     padding: 20px 14px;
   }

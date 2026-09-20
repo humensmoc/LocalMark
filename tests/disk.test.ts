@@ -33,7 +33,7 @@ it("round-trips a real Windows directory with per-page files and manual-edit pro
     },
     async listJson() {
       try {
-        return await readdir(join(root, "原始数据"));
+        return await readdir(join(root, "data"));
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
         throw e;
@@ -73,7 +73,7 @@ it("round-trips a real Windows directory with per-page files and manual-edit pro
       },
     ],
   };
-  const lib = emptyLibrary();
+  const lib = { ...emptyLibrary(), autoGenerateMarkdown: true };
   lib.entries[id] = {
     page,
     baseJson: null,
@@ -84,7 +84,7 @@ it("round-trips a real Windows directory with per-page files and manual-edit pro
   const engine = new SyncEngine(lib, files, async () => {});
   await engine.run();
   expect(lib.status).toBe("已保存到本地文件");
-  const jsonPath = `原始数据/${id}.json`,
+  const jsonPath = `data/${id}.json`,
     mdPath = page.markdownFile!;
   const external = JSON.parse((await files.read(jsonPath))!);
   external.annotations[0].note = "文件系统中的修改";

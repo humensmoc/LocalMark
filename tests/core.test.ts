@@ -22,6 +22,7 @@ import { capture, indexText, locate } from "../src/anchors";
 import { SyncEngine } from "../src/sync";
 import type { Files } from "../src/files";
 Object.defineProperty(globalThis, "crypto", { value: webcrypto });
+const exportingLibrary = () => ({ ...emptyLibrary(), autoGenerateMarkdown: true });
 const markId = "12b942f7-841f-4f5d-bdd5-8d404706125c";
 async function fixture(): Promise<Page> {
   const url = "https://example.com/article?q=1";
@@ -75,14 +76,14 @@ class MemoryFiles implements Files {
   }
   async listJson() {
     return [...this.data.keys()]
-      .filter((p) => p.startsWith("原始数据/"))
-      .map((p) => p.slice("原始数据/".length));
+      .filter((p) => p.startsWith("data/"))
+      .map((p) => p.slice("data/".length));
   }
 }
 async function setup() {
   const p = await fixture(),
     files = new MemoryFiles(),
-    lib = emptyLibrary();
+    lib = exportingLibrary();
   const e: Entry = {
     page: p,
     baseJson: null,
@@ -98,10 +99,91 @@ async function setup() {
     files,
     lib,
     engine,
-    json: `原始数据/${p.id}.json`,
+    json: `data/${p.id}.json`,
     md: markdownFileName(p.title),
   };
 }
+describe("optional Markdown generation", () => {
+  it.each([false, undefined])("saves annotations as JSON without Markdown when setting is %s", async (enabled) => {
+    const { p, e, lib, engine, files, json } = await setup();
+    expect(emptyLibrary().autoGenerateMarkdown).toBe(false);
+    lib.autoGenerateMarkdown = enabled as boolean;
+    const read = files.read.bind(files);
+    files.read = async (path) => {
+      expect(path.endsWith(".md")).toBe(false);
+      return read(path);
+    };
+    await engine.run();
+    expect(JSON.parse(files.data.get(json)!).annotations[0].note).toBe(p.annotations[0].note);
+    expect([...files.data.keys()].some(path => path.endsWith(".md"))).toBe(false);
+    expect(p.markdownFile).toBeUndefined();
+    expect(e.dirty || e.mdDirty || e.issue).toBeFalsy();
+    expect(lib.status).toBe("已保存到本地文件");
+  });
+
+  it("exports existing content on enable, freezes on disable, and catches up on re-enable", async () => {
+    const { p, e, lib, engine, files, json, md } = await setup();
+    lib.autoGenerateMarkdown = false;
+    await engine.run();
+    lib.autoGenerateMarkdown = true;
+    await engine.run();
+    const exported = files.data.get(md);
+    expect(exported).toContain("hello world");
+    lib.autoGenerateMarkdown = false;
+    p.annotations[0].note = "关闭期间的批注";
+    e.dirty = e.mdDirty = true;
+    await engine.run();
+    expect(files.data.get(md)).toBe(exported);
+    expect(JSON.parse(files.data.get(json)!).annotations[0].note).toBe("关闭期间的批注");
+    expect(e.baseMd).toBe(exported);
+    expect(e.mdDirty).toBe(false);
+    lib.autoGenerateMarkdown = true;
+    await engine.run();
+    expect(files.data.get(md)).toContain("关闭期间的批注");
+    expect(e.issue).toBeUndefined();
+    lib.autoGenerateMarkdown = false;
+    const updated = files.data.get(md);
+    p.annotations = [];
+    e.dirty = e.mdDirty = true;
+    await engine.run();
+    expect(files.data.get(md)).toBe(updated);
+  });
+
+  it("preserves manual edits while off and checks them again when enabled", async () => {
+    const { p, e, lib, engine, files, json, md } = await setup();
+    await engine.run();
+    const base = e.baseMd;
+    files.data.set(md, "手改文档");
+    await engine.run();
+    expect(e.issue?.kind).toBe("markdown");
+    lib.autoGenerateMarkdown = false;
+    p.annotations[0].note = "继续保存";
+    e.dirty = e.mdDirty = true;
+    await engine.run();
+    expect(JSON.parse(files.data.get(json)!).annotations[0].note).toBe("继续保存");
+    expect(files.data.get(md)).toBe("手改文档");
+    expect(e.baseMd).toBe(base);
+    expect(e.issue).toBeUndefined();
+    lib.autoGenerateMarkdown = true;
+    await engine.run();
+    expect(e.issue?.kind).toBe("markdown");
+    expect(files.data.get(md)).toBe("手改文档");
+  });
+
+  it("reads external JSON without migrating legacy Markdown while disabled", async () => {
+    const { p, files, json } = await setup();
+    const oldPath = `${p.folderName}/标注.md`;
+    files.data.set(json, JSON.stringify(p));
+    files.data.set(oldPath, previousMarkdown(p));
+    const restored = emptyLibrary();
+    await new SyncEngine(restored, files, async () => {}).run();
+    expect(restored.entries[p.id].page.annotations).toEqual(p.annotations);
+    expect(restored.entries[p.id].page.markdownFile).toBeUndefined();
+    expect(files.data.get(oldPath)).toBe(previousMarkdown(p));
+    expect([...files.data.keys()].filter(path => path.endsWith(".md"))).toEqual([oldPath]);
+  });
+});
+
 describe("Markdown content eligibility", () => {
   it.each([undefined, "", " \n\t "])("saves JSON without Markdown for empty content (%s)", async (comment) => {
     const { p, e, files, lib, engine, json } = await setup();
@@ -146,7 +228,7 @@ describe("Markdown content eligibility", () => {
     const path = legacy ? `${p.folderName}/标注.md` : md;
     files.data.set(json, JSON.stringify(p));
     files.data.set(path, legacy ? previousMarkdown(p) : markdown(p));
-    const lib = emptyLibrary();
+    const lib = exportingLibrary();
     await new SyncEngine(lib, files, async () => {}).run();
     expect(files.data.has(path)).toBe(false);
     expect(files.data.has(json)).toBe(true);
@@ -191,12 +273,12 @@ describe("identity and export", () => {
     const p = await fixture();
     const { category: _category, ...legacy } = p;
     legacy.tags = ["游戏营销", "Steam", "Demo"];
-    const files = new MemoryFiles(), lib = emptyLibrary();
+    const files = new MemoryFiles(), lib = exportingLibrary();
     legacy.markdownFile = markdownFileName(p.title);
-    files.data.set(`原始数据/${p.id}.json`, JSON.stringify(legacy));
+    files.data.set(`data/${p.id}.json`, JSON.stringify(legacy));
     files.data.set(legacy.markdownFile, compactMarkdown({ ...p, tags: legacy.tags }));
     await new SyncEngine(lib, files, async () => {}).run();
-    const stored = JSON.parse(files.data.get(`原始数据/${p.id}.json`)!);
+    const stored = JSON.parse(files.data.get(`data/${p.id}.json`)!);
     expect(stored.category).toBe(DEFAULT_CATEGORY);
     expect(stored.tags).toEqual(legacy.tags);
     expect(lib.entries[p.id].issue).toBeUndefined();
@@ -219,7 +301,8 @@ describe("identity and export", () => {
     expect(output).not.toContain("<!--");
     expect(output).not.toContain(p.id);
     expect(output).not.toContain(markId);
-    expect(output).toContain(textLink(p, p.annotations[0].anchor));
+    expect(output).not.toContain(textLink(p, p.annotations[0].anchor));
+    expect(output).not.toContain("回到原文并高亮");
     expect(p.annotations[0].id).toBe(markId);
     p.tags = [];
     expect(parseYaml(markdown(p).split("\n---\n")[0].slice(4)).tags).toEqual([]);
@@ -229,14 +312,14 @@ describe("identity and export", () => {
       const p = await fixture();
       p.comment = "整页评论";
       p.markdownFile = markdownFileName(p.title);
-      const files = new MemoryFiles(), lib = emptyLibrary();
+      const files = new MemoryFiles(), lib = exportingLibrary();
       const raw = JSON.stringify(p);
       const old = compactMarkdown(p) + (modified ? "\n手工补充\n" : "");
-      files.data.set(`原始数据/${p.id}.json`, raw);
+      files.data.set(`data/${p.id}.json`, raw);
       files.data.set(p.markdownFile, old);
       await new SyncEngine(lib, files, async () => {}).run();
       expect(files.data.get(p.markdownFile)).toBe(modified ? old : markdown(p));
-      const migrated = JSON.parse(files.data.get(`原始数据/${p.id}.json`)!);
+      const migrated = JSON.parse(files.data.get(`data/${p.id}.json`)!);
       expect(migrated.schemaVersion).toBe(2);
       expect(migrated.id).toBe(p.id);
       expect(migrated.annotations).toEqual(p.annotations);
@@ -282,7 +365,7 @@ describe("identity and export", () => {
     expect(JSON.parse(files.data.get(json)!).comment).toBe(p.comment);
     expect(files.data.get(md)).toContain("## 网页评论\n\n整体想法  \n\\<script\\> & \\*\\*纯文本\\*\\*");
     expect(files.data.get(md)).not.toContain("回到原文并高亮");
-    const restored = emptyLibrary();
+    const restored = exportingLibrary();
     const reopened = new SyncEngine(restored, files, async () => {});
     await reopened.run();
     expect(restored.entries[p.id].page.comment).toBe(p.comment);
@@ -306,25 +389,48 @@ describe("identity and export", () => {
       await expect(parsePage(JSON.stringify({ ...p, comment }))).rejects.toThrow();
     }
   });
-  it("exports quotes, optional notes and links without annotation headings", async () => {
+  it("exports quotes and optional notes without text-fragment links or annotation headings", async () => {
     const p = await fixture();
-    expect(markdown(p)).toContain("> hello world\n\n笔记  \n第二行\n\n[回到原文并高亮]");
+    expect(markdown(p)).toContain("> hello world\n\n笔记  \n第二行\n");
+    expect(markdown(p)).not.toContain("回到原文并高亮");
+    expect(markdown(p)).not.toContain(":~:text=");
     expect(markdown(p)).not.toMatch(/^#{2,3} /m);
     for (const note of ["", " \n\t"]) {
       p.annotations[0].note = note;
-      expect(markdown(p)).toContain("> hello world\n\n[回到原文并高亮]");
+      expect(markdown(p)).toMatch(/> hello world\n$/);
       expect(markdown(p)).not.toContain("未填写批注");
     }
-    expect(markdown(p)).toContain("回到原文并高亮");
+    expect(markdown(p)).not.toContain("回到原文并高亮");
+    p.annotations.push({ ...p.annotations[0], id: crypto.randomUUID(), text: "second quote" });
+    expect(markdown(p)).toContain("> hello world\n\n---\n\n> second quote\n");
+  });
+  it.each([false, true])("upgrades old frontmatter exports while preserving manual edits (modified=%s)", async (modified) => {
+    for (const note of ["", "笔记\n第二行"]) {
+      const p = await fixture();
+      p.annotations[0].note = note;
+      p.markdownFile = markdownFileName(p.title);
+      const files = new MemoryFiles(), lib = exportingLibrary();
+      // Literal pre-0.2.7 layout: independent of the current Markdown renderer.
+      const old = `---\ncreated: ${p.createdAt}\nupdated: ${p.updatedAt}\ncategory: "未分类"\ntags:\n  - "设计"\nsource: "${p.url}"\n---\n\n> hello world\n\n${note ? "笔记  \n第二行\n\n" : ""}[回到原文并高亮](<https://example.com/article?q=1#:~:text=before-,hello%20world,-after>)\n${modified ? "\n个人补充\n" : ""}`;
+      files.data.set(`data/${p.id}.json`, JSON.stringify(p));
+      files.data.set(p.markdownFile, old);
+      const engine = new SyncEngine(lib, files, async () => {});
+      await engine.run();
+      expect(files.data.get(p.markdownFile)).toBe(modified ? old : markdown(p));
+      expect(lib.entries[p.id].issue?.kind).toBe(modified ? "markdown" : undefined);
+      const writes = files.writes.length;
+      await engine.run();
+      expect(files.writes).toHaveLength(writes);
+    }
   });
   it("upgrades untouched titled exports on reconnect but preserves manual changes", async () => {
     for (const modified of [false, true]) {
       const p = await fixture();
       p.annotations[0].note = "";
       p.markdownFile = markdownFileName(p.title);
-      const files = new MemoryFiles(), lib = emptyLibrary();
+      const files = new MemoryFiles(), lib = exportingLibrary();
       const old = titledMarkdown(p) + (modified ? "\n个人补充\n" : "");
-      files.data.set(`原始数据/${p.id}.json`, JSON.stringify(p));
+      files.data.set(`data/${p.id}.json`, JSON.stringify(p));
       files.data.set(p.markdownFile, old);
       await new SyncEngine(lib, files, async () => {}).run();
       expect(files.data.get(p.markdownFile)).toBe(modified ? old : markdown(p));
@@ -347,8 +453,8 @@ describe("identity and export", () => {
   it("keeps manually edited legacy Markdown until the user resolves it", async () => {
     const p = await fixture(),
       files = new MemoryFiles(),
-      lib = emptyLibrary();
-    files.data.set(`原始数据/${p.id}.json`, JSON.stringify(p));
+      lib = exportingLibrary();
+    files.data.set(`data/${p.id}.json`, JSON.stringify(p));
     files.data.set(`${p.folderName}/标注.md`, "人工保留内容");
     await new SyncEngine(lib, files, async () => {}).run();
     expect(lib.entries[p.id].issue?.kind).toBe("markdown");
@@ -371,12 +477,12 @@ describe("identity and export", () => {
     const p = await fixture();
     const { tags: _tags, ...legacy } = p;
     const files = new MemoryFiles();
-    files.data.set(`原始数据/${p.id}.json`, JSON.stringify(legacy));
+    files.data.set(`data/${p.id}.json`, JSON.stringify(legacy));
     files.data.set(`${p.folderName}/标注.md`, previousMarkdown(p, true));
-    const lib = emptyLibrary();
+    const lib = exportingLibrary();
     await new SyncEngine(lib, files, async () => {}).run();
     expect(lib.entries[p.id].issue).toBeUndefined();
-    expect(JSON.parse(files.data.get(`原始数据/${p.id}.json`)!).tags).toEqual([
+    expect(JSON.parse(files.data.get(`data/${p.id}.json`)!).tags).toEqual([
       "设计",
     ]);
     expect(files.data.has(`${p.folderName}/标注.md`)).toBe(false);
@@ -529,7 +635,7 @@ describe("real-file synchronization contract", () => {
   it("rebuilds an empty cache from disk", async () => {
     const { engine, files, p } = await setup();
     await engine.run();
-    const lib = emptyLibrary();
+    const lib = exportingLibrary();
     await new SyncEngine(lib, files, async () => {}).run();
     expect(lib.entries[p.id].page.annotations[0].note).toBe("笔记\n第二行");
     expect(lib.status).toBe("已保存到本地文件");
@@ -584,7 +690,8 @@ describe("real-file synchronization contract", () => {
     files.fail = "";
     await engine.run();
     expect(e.mdDirty).toBe(false);
-    expect(files.data.get(md)?.match(/\[回到原文并高亮\]/g)).toHaveLength(1);
+    expect(files.data.get(md)?.match(/^> hello world$/gm)).toHaveLength(1);
+    expect(files.data.get(md)).not.toContain("回到原文并高亮");
     expect(JSON.parse(files.data.get(json)!).annotations[0].id).toBe(markId);
   });
   it("requires a choice for externally deleted JSON", async () => {

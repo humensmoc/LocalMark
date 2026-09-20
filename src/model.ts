@@ -114,6 +114,7 @@ export type Entry = {
   legacyMdBase?: string | null;
 };
 export type Library = {
+  autoGenerateMarkdown?: boolean;
   taxonomy?: Taxonomy;
   taxonomyBase?: string | null;
   taxonomyDirty?: boolean;
@@ -127,6 +128,7 @@ export type Library = {
 export type Taxon = { id: string; name: string; description?: string };
 export type Taxonomy = { version: 1; revision: string; categories: Taxon[]; tags: Taxon[]; colorDescriptions?: Partial<Record<Color, string>> };
 export const emptyLibrary = (): Library => ({
+  autoGenerateMarkdown: false,
   entries: {},
   lastColor: "yellow",
   status: "尚未连接本地文件夹；标注暂存于浏览器",
@@ -256,7 +258,7 @@ export function compactMarkdown(p: Page) {
     return `${quote}\n\n${note}[回到原文并高亮](<${textLink(p, m.anchor)}>)\n\n<!-- annotation:${m.id} -->\n`;
   }).join("\n---\n\n");
 }
-export function markdown(p: Page) {
+function frontmatterMarkdown(p: Page, legacyTextLinks: boolean) {
   // JSON-quoted strings are valid YAML scalars, including quotes and newlines.
   const tags = p.tags?.length
     ? "tags:\n" + p.tags.map((tag) => `  - ${JSON.stringify(tag)}\n`).join("")
@@ -268,14 +270,20 @@ export function markdown(p: Page) {
     : "";
   const excerpts = p.annotations.map((m) => {
     const quote = m.text.split("\n").map((line) => "> " + md(line)).join("\n");
-    const note = m.note.trim() ? m.note.split("\n").map(md).join("  \n") + "\n\n" : "";
-    return `${quote}\n\n${note}[回到原文并高亮](<${textLink(p, m.anchor)}>)\n`;
+    const note = m.note.trim() ? m.note.split("\n").map(md).join("  \n") : "";
+    // Keep the old format only for recognizing untouched exports during sync.
+    if (legacyTextLinks)
+      return `${quote}\n\n${note ? note + "\n\n" : ""}[回到原文并高亮](<${textLink(p, m.anchor)}>)\n`;
+    return `${quote}${note ? "\n\n" + note : ""}\n`;
   }).join("\n---\n\n");
   return header + comment + excerpts;
 }
+export function markdown(p: Page) {
+  return frontmatterMarkdown(p, false);
+}
 export function isGeneratedMarkdown(value: string, p: Page) {
   // A marker alone is not proof that a document has no manual edits.
-  return value === markdown(p) || value === compactMarkdown(p) ||
+  return value === markdown(p) || value === frontmatterMarkdown(p, true) || value === compactMarkdown(p) ||
     value === titledMarkdown(p) || value === previousMarkdown(p) ||
     value === previousMarkdown(p, true);
 }

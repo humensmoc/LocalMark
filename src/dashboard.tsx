@@ -18,6 +18,7 @@ import { PageRating } from "./PageRating";
 import { PageTitle, type TitleDraft } from "./PageTitle";
 import { SiteIcon } from "./SiteIcon";
 import { Icon } from "./Icon";
+import { MetadataImport } from "./MetadataImport";
 import { useDashboardLayout } from "./DashboardLayout";
 import { TaxonomyManager } from "./TaxonomyManager";
 import { BulkToolbar } from "./BulkToolbar";
@@ -209,6 +210,11 @@ function Dashboard() {
           placeholder={catalogKind ? "搜索名称或说明…" : "搜索标题、标签、评论或摘录…"}
           value={query} onChange={(e) => setQuery(e.target.value)} />
         <div className="dashboard-actions">
+          <MetadataImport onImported={result => {
+            setLib(result.library);
+            const first = result.items.find(item => item.status === "saved" || item.status === "pending");
+            if (first?.pageId) { setView("pages"); setQuery(""); setFilter({ category: "", tags: [] }); setSelectedId(first.pageId); }
+          }} />
           <button onClick={() => setManaging("manage")}>分类与标签管理</button>
           <button disabled={loading} onClick={() => void refresh()}>
             <Icon name="refresh" size={16} />

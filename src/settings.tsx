@@ -109,9 +109,34 @@ function Settings() {
       <section>
         <h2>连接你的本地文件夹</h2>
         <p>
-          选择一个用于摘录的专用文件夹，也可以放在 Obsidian Vault 内。有高亮、批注或网页评论时才生成
-          Markdown；只有分类和标签时仅保存 JSON 原始数据。
+          选择一个用于摘录的专用文件夹，也可以放在 Obsidian Vault 内。标注和网页信息会保存为
+          JSON 原始数据；需要 Markdown 阅读副本时，可开启下方开关。
         </p>
+        <div className="markdown-setting">
+          <div>
+            <label htmlFor="auto-generate-markdown">自动生成 Markdown 文档</label>
+            <p id="markdown-setting-help">
+              默认关闭。开启后，为已有和新增的高亮、批注或网页评论生成并更新 .md 文档。
+              关闭后仍保存标注和 JSON，已有 .md 文档保留且不再更新。
+            </p>
+          </div>
+          <div className="setting-control">
+            <span>{lib.autoGenerateMarkdown ? "已开启" : "已关闭"}</span>
+            <input
+              id="auto-generate-markdown"
+              className="setting-switch"
+              type="checkbox"
+              role="switch"
+              aria-describedby="markdown-setting-help"
+              checked={lib.autoGenerateMarkdown === true}
+              disabled={busy}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                void run(() => request({ type: "auto-generate-markdown", enabled }));
+              }}
+            />
+          </div>
+        </div>
         <div className="directory">
           <Icon name="folder" size={25} />
           <div>
@@ -247,11 +272,11 @@ function Settings() {
           </li>
         </ol>
         <pre>
-          {"摘录根目录/\n├── 分类标签.json\n├── 网页标题.md\n└── 原始数据/\n    └── 网页ID.json"}
+          {"摘录根目录/\n├── 分类标签.json\n├── 网页标题.md（开启自动生成后）\n└── data/\n    └── 2026-09/\n        └── 20/\n            └── 文章标题--网页ID.json"}
         </pre>
         <p className="tip">
           Markdown
-          是自动生成的阅读副本，不反向同步。检测到手改会暂停覆盖。浏览器重启后若目录权限失效，点击“重新授权”。未连接或无权限时只暂存浏览器。
+          是开启开关后自动生成的阅读副本，不反向同步。检测到手改会暂停覆盖。浏览器重启后若目录权限失效，点击“重新授权”。未连接或无权限时只暂存浏览器。
         </p>
       </section>
       <footer>

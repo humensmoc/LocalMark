@@ -185,6 +185,11 @@ try {
   }, base);
   const rpc = (target, value) =>
     target.evaluate((m) => chrome.runtime.sendMessage(m), value);
+  // This suite checks existing Markdown as well as JSON; enable exports through
+  // the real settings control before any title or content migration assertions.
+  await settings.reload();
+  await settings.getByRole("switch", { name: "自动生成 Markdown 文档" }).click();
+  await settings.waitForFunction(async () => (await chrome.runtime.sendMessage({ type: "snapshot" })).data.autoGenerateMarkdown === true);
   await page.getByRole("button", { name: "刷新本地数据" }).click();
   const detail = page.getByRole("region", { name: "文章详情", exact: true });
   const list = page.getByRole("region", { name: "筛选与文章列表" });
@@ -351,8 +356,18 @@ try {
   }
   const renamedDisk = await page.evaluate(async (id) => {
     const root = await navigator.storage.getDirectory();
-    const dir = await root.getDirectoryHandle("原始数据");
-    const saved = JSON.parse(await (await (await dir.getFileHandle(`${id}.json`)).getFile()).text());
+    const dir = await root.getDirectoryHandle("data");
+    async function* walk(directory) {
+      for await (const [name, handle] of directory.entries()) {
+        if (handle.kind === "directory") yield* walk(handle);
+        else yield [name, handle];
+      }
+    }
+    const matches = [];
+    for await (const [name, handle] of walk(dir))
+      if (handle.kind === "file" && name.endsWith(`--${id}.json`)) matches.push(handle);
+    if (matches.length !== 1) throw Error("Expected one readable JSON filename");
+    const saved = JSON.parse(await (await matches[0].getFile()).text());
     return { title: saved.title, markdown: await (await (await root.getFileHandle(saved.markdownFile)).getFile()).text() };
   }, seeded[0]);
   assert.equal(renamedDisk.title, revisedTitle);
@@ -465,11 +480,18 @@ try {
   }
   const disk = await page.evaluate(async (id) => {
     const root = await navigator.storage.getDirectory();
-    const raw = await (
-      await (
-        await root.getDirectoryHandle("原始数据")
-      ).getFileHandle(`${id}.json`)
-    ).getFile();
+    const dir = await root.getDirectoryHandle("data");
+    async function* walk(directory) {
+      for await (const [name, handle] of directory.entries()) {
+        if (handle.kind === "directory") yield* walk(handle);
+        else yield [name, handle];
+      }
+    }
+    const matches = [];
+    for await (const [name, handle] of walk(dir))
+      if (handle.kind === "file" && name.endsWith(`--${id}.json`)) matches.push(handle);
+    if (matches.length !== 1) throw Error("Expected one readable JSON filename");
+    const raw = await matches[0].getFile();
     const p = JSON.parse(await raw.text());
     const md = await (await root.getFileHandle(p.markdownFile)).getFile();
     return { p, md: await md.text() };
@@ -592,9 +614,18 @@ try {
   // Simulate an AI changing a local JSON file, then reread it without visiting the website.
   await page.evaluate(async (id) => {
     const root = await navigator.storage.getDirectory();
-    const handle = await (
-      await root.getDirectoryHandle("原始数据")
-    ).getFileHandle(`${id}.json`);
+    const dir = await root.getDirectoryHandle("data");
+    async function* walk(directory) {
+      for await (const [name, handle] of directory.entries()) {
+        if (handle.kind === "directory") yield* walk(handle);
+        else yield [name, handle];
+      }
+    }
+    const matches = [];
+    for await (const [name, handle] of walk(dir))
+      if (handle.kind === "file" && name.endsWith(`--${id}.json`)) matches.push(handle);
+    if (matches.length !== 1) throw Error("Expected one readable JSON filename");
+    const handle = matches[0];
     const p = JSON.parse(await (await handle.getFile()).text());
     const catalogHandle = await root.getFileHandle("分类标签.json");
     const catalog = JSON.parse(await (await catalogHandle.getFile()).text());

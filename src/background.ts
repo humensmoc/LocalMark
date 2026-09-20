@@ -18,6 +18,8 @@ import { DirectoryFiles } from "./files";
 import { SyncEngine } from "./sync";
 import { mergeSyncResult } from "./sync-state";
 import type { Request } from "./protocol";
+import { prepareMetadataImport, validateImportBatch, type ImportRequest } from "./metadata-import";
+import { metadataFilePath } from "./metadata-names";
 import { migrateTaxonomy, manageTaxonomy, bulkTaxonomy, ensureTaxon, projectPage, taxonomyToken } from "./taxonomy";
 let queue: Promise<unknown> = Promise.resolve();
 const serial = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -28,6 +30,8 @@ const serial = <T>(fn: () => Promise<T>): Promise<T> => {
 async function library() {
   const lib = (await db.get<Library>("library")) ?? emptyLibrary();
   const beforeMigration = JSON.stringify(lib);
+  // Existing installations also opt in explicitly; a missing setting stays off.
+  lib.autoGenerateMarkdown = lib.autoGenerateMarkdown === true;
   let changed = false;
   for (const e of Object.values(lib.entries)) {
     if (!Array.isArray(e.page.tags) || e.page.category === undefined) {
@@ -144,6 +148,18 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
   }
   const lib = await library();
   if (m.type === "snapshot") return lib;
+  if (m.type === "auto-generate-markdown") {
+    if (sender.url !== chrome.runtime.getURL("settings.html"))
+      throw Error("请在设置中修改 Markdown 自动生成开关。");
+    if (typeof m.enabled !== "boolean") throw Error("开关值无效。");
+    lib.autoGenerateMarkdown = m.enabled;
+    for (const e of Object.values(lib.entries)) {
+      e.mdDirty = m.enabled;
+      if (!m.enabled && e.issue?.kind === "markdown") delete e.issue;
+    }
+    await db.set("library", lib);
+    return lib;
+  }
   if (m.type === "taxonomy" || m.type === "bulk-taxonomy") {
     if (sender.url !== chrome.runtime.getURL("dashboard.html")) throw Error("请在仪表盘管理分类和标签。");
     const next = structuredClone(lib);
@@ -322,8 +338,42 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
   void notify().catch(() => {});
   return lib;
 }
-async function dispatch(m: Request, sender: chrome.runtime.MessageSender) {
+async function dispatch(m: Request | ImportRequest, sender: chrome.runtime.MessageSender) {
   if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
+  if (m.type === "import-metadata") {
+    if (!isLibraryUI(sender)) throw Error("请在侧边栏或仪表盘中导入元数据。");
+    const files = validateImportBatch(m.files);
+    return serialFiles(async () => {
+      const root = await db.get<FileSystemDirectoryHandle>("root");
+      if (!root) throw Error("请先在设置中连接本地文件夹，再导入 JSON。");
+      if (await root.queryPermission({ mode: "readwrite" }) !== "granted")
+        throw Error("当前目录没有读写权限，请先在设置中重新授权，再导入 JSON。");
+      await sync();
+      const result = await serial(async () => {
+        const result = await prepareMetadataImport(await library(), files);
+        if (result.items.some(item => item.status === "pending")) {
+          result.library.status = "已暂存导入内容，正在写入当前目录";
+          await db.set("library", result.library);
+        }
+        return result;
+      });
+      const ids = new Set(result.items.filter(item => item.status === "pending").map(item => item.pageId!));
+      if (ids.size) await sync(ids);
+      const latest = await serial(library);
+      for (const item of result.items) {
+        if (item.status !== "pending") continue;
+        const entry = latest.entries[item.pageId!];
+        if (entry && !entry.dirty && !entry.mdDirty && !entry.issue && entry.baseJson !== null) {
+          item.status = "saved";
+          item.message = metadataFilePath(entry.page.title, entry.page.id, entry.page.createdAt);
+        } else item.message = entry?.issue?.message ?? latest.status;
+      }
+      await notify();
+      return { library: latest, items: result.items, directoryName: root.name || "当前目录" };
+    });
+  }
+  if (m.type === "auto-generate-markdown" && sender.url !== chrome.runtime.getURL("settings.html"))
+    throw Error("请在设置中修改 Markdown 自动生成开关。");
   if (["taxonomy", "bulk-taxonomy", "resolve-taxonomy"].includes(m.type) && sender.url !== chrome.runtime.getURL("dashboard.html"))
     throw Error("请在仪表盘管理分类和标签。");
   if (m.type === "taxonomy" || m.type === "bulk-taxonomy") {
@@ -332,11 +382,12 @@ async function dispatch(m: Request, sender: chrome.runtime.MessageSender) {
       return serial(() => handle(m, sender));
     });
   }
-  if (m.type === "directory-connected" || m.type === "resolve" ||
+  if (m.type === "directory-connected" || m.type === "auto-generate-markdown" || m.type === "resolve" ||
       m.type === "resolve-taxonomy" ||
       (m.type === "snapshot" && m.refresh)) {
     return serialFiles(async () => {
-      if (m.type === "directory-connected") await serial(() => handle(m, sender));
+      // Serialize the setting with file writes so an older writer cannot run after it takes effect.
+      if (m.type === "directory-connected" || m.type === "auto-generate-markdown") await serial(() => handle(m, sender));
       await sync(undefined, m.type === "resolve" || m.type === "resolve-taxonomy" ? m : undefined);
       await notify();
       return serial(library);

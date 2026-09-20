@@ -100,8 +100,22 @@ try {
   if (!worker) worker = await context.waitForEvent("serviceworker");
   const extId = new URL(worker.url()).host;
   const settings = await context.newPage();
+  await settings.addInitScript(() => {
+    window.findMetadata = async (root, id) => {
+      async function walk(dir) {
+        for await (const [name, handle] of dir.entries()) {
+          if (handle.kind === "directory") { const found = await walk(handle); if (found) return found; }
+          else if (name.endsWith(`--${id}.json`)) return handle;
+        }
+      }
+      const file = await walk(await root.getDirectoryHandle("data"));
+      if (!file) throw Error("Metadata file missing");
+      return file;
+    };
+  });
   await settings.goto(`chrome-extension://${extId}/settings.html`);
   await settings.getByRole("heading", { name: "连接你的本地文件夹" }).waitFor();
+  await settings.getByRole("switch", { name: "自动生成 Markdown 文档" }).click();
   ok("settings page loads in real extension context");
   const rpc = (m) => settings.evaluate((m) => chrome.runtime.sendMessage(m), m);
   const state = async () => {
@@ -501,9 +515,9 @@ try {
   );
   const recovered = await settings.evaluate(async (id) => {
     const root = await navigator.storage.getDirectory();
-    const dir = await root.getDirectoryHandle("原始数据");
+    const file = await window.findMetadata(root, id);
     return JSON.parse(
-      await (await (await dir.getFileHandle(id + ".json")).getFile()).text(),
+      await (await file.getFile()).text(),
     );
   }, beforeDenied.page.id);
   assert.equal(recovered.annotations[0].note, "授权恢复后写入");
@@ -517,8 +531,7 @@ try {
     return settings.evaluate(
       async ({ id, source }) => {
         const root = await navigator.storage.getDirectory(),
-          dir = await root.getDirectoryHandle("原始数据"),
-          f = await dir.getFileHandle(id + ".json");
+          f = await window.findMetadata(root, id);
         const obj = JSON.parse(await (await f.getFile()).text());
         if (source === "external-note")
           obj.annotations[0].note = "从 JSON 读回的新批注";
@@ -783,8 +796,8 @@ try {
   }, "standalone comment and tags finish syncing");
   const commentExport = await settings.evaluate(async id => {
     const root = await navigator.storage.getDirectory();
-    const dir = await root.getDirectoryHandle("原始数据");
-    const json = JSON.parse(await (await (await dir.getFileHandle(id + ".json")).getFile()).text());
+    const file = await window.findMetadata(root, id);
+    const json = JSON.parse(await (await file.getFile()).text());
     const md = await (await (await root.getFileHandle(json.markdownFile)).getFile()).text();
     return { json, md };
   }, commentEntry.page.id);
@@ -817,8 +830,8 @@ try {
   }, "category JSON and Markdown finish syncing");
   const categoryFile = await settings.evaluate(async id => {
     const root = await navigator.storage.getDirectory();
-    const dir = await root.getDirectoryHandle("原始数据");
-    const json = JSON.parse(await (await (await dir.getFileHandle(id + ".json")).getFile()).text());
+    const file = await window.findMetadata(root, id);
+    const json = JSON.parse(await (await file.getFile()).text());
     return { json, md: await (await (await root.getFileHandle(json.markdownFile)).getFile()).text() };
   }, commentEntry.page.id);
   assert.equal(categoryFile.json.category, "独立创作");

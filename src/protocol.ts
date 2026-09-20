@@ -50,6 +50,7 @@ export type Request =
       expectedTaxonomy?: string;
     }
   | { type: "snapshot"; refresh?: boolean }
+  | { type: "auto-generate-markdown"; enabled: boolean }
   | {
       type: "save";
       url: string;

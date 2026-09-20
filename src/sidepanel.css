@@ -35,3 +35,29 @@ body {
 .toast {
   max-width: calc(100vw - 24px);
 }
+.page-metadata-location {
+  margin-top: 10px;
+}
+.page-metadata-location .metadata-open {
+  padding: 5px 8px;
+  border: 1px solid #354053;
+  font-size: 12px;
+}
+.page-metadata-location .metadata-copy,
+.page-metadata-location .metadata-download {
+  padding: 5px 2px;
+  font-size: 11px;
+}
+.page-metadata-location button:disabled {
+  cursor: default;
+}
+.page-metadata-location small {
+  display: block;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+.page-metadata-location .metadata-filename {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

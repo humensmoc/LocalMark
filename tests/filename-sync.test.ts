@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DirectoryFiles } from "../src/files";
 import { emptyLibrary, folderName, markdownFileName, pageId, previousMarkdown, type Page } from "../src/model";
 import { SyncEngine } from "../src/sync";
+import { metadataFilePath } from "../src/metadata-names";
 
 // Native Chromium rejects format characters in path components. OPFS and
 // node:fs do not enforce the same restriction, so model it at the handle API.
@@ -23,6 +24,10 @@ function nativeFiles() {
         if (path.startsWith(prefix) && !path.slice(prefix.length).includes("/"))
           yield [path.slice(prefix.length), handle(path + "/")];
       }
+      for (const path of data.keys()) {
+        if (path.startsWith(prefix) && !path.slice(prefix.length).includes("/"))
+          yield [path.slice(prefix.length), { kind: "file" }];
+      }
     },
     async getFileHandle(name: string, options?: { create?: boolean }) {
       if (/\p{Cf}/u.test(name)) throw new TypeError("Name is not allowed.");
@@ -40,6 +45,8 @@ function nativeFiles() {
     },
     async removeEntry(name: string) {
       if (/\p{Cf}/u.test(name)) throw new TypeError("Name is not allowed.");
+      if ([...data.keys()].some(path => path.startsWith(prefix + name + "/")))
+        throw new DOMException("Not empty", "InvalidModificationError");
       data.delete(prefix + name);
       directories.delete(prefix + name);
     },
@@ -56,7 +63,7 @@ async function pendingPage() {
     createdAt: "2026-09-17T01:00:00.000Z", updatedAt: "2026-09-17T01:00:00.000Z",
     annotations: [], comment: "记录反馈表的使用说明",
   };
-  const lib = emptyLibrary();
+  const lib = { ...emptyLibrary(), autoGenerateMarkdown: true };
   lib.entries[id] = { page, baseJson: null, baseMd: null, dirty: true, mdDirty: true,
     issue: { kind: "io", message: "文件写入失败：Name is not allowed." } };
   return { lib, page, id };
@@ -84,7 +91,7 @@ describe("invisible title characters and native directory sync", () => {
       lib.entries[id].dirty = lib.entries[id].mdDirty = true;
       await engine.run(new Set([id]));
       expect(lib.status).toBe("已保存到本地文件");
-      expect(JSON.parse(data.get(`原始数据/${id}.json`)!).tags).toEqual(tags);
+      expect(JSON.parse(data.get(metadataFilePath(page.title, id, page.createdAt))!).tags).toEqual(tags);
       expect(data.get(page.markdownFile!)).toContain('category: "游戏设计"');
     }
     expect([...data.keys()]).toHaveLength(3);

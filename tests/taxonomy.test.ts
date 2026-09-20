@@ -8,13 +8,13 @@ import type { Files } from "../src/files";
 class MemoryFiles implements Files {
   data = new Map<string, string>();
   writes: string[] = [];
-  async listJson() { return [...this.data.keys()].filter(x => x.startsWith("原始数据/")).map(x => x.split("/")[1]); }
+  async listJson() { return [...this.data.keys()].filter(x => x.startsWith("data/")).map(x => x.split("/")[1]); }
   async read(path: string) { return this.data.get(path) ?? null; }
   async write(path: string, value: string) { this.writes.push(path); this.data.set(path, value); }
   async remove(path: string) { this.data.delete(path); }
 }
 async function setup() {
-  const lib = emptyLibrary(), files = new MemoryFiles();
+  const lib = { ...emptyLibrary(), autoGenerateMarkdown: true }, files = new MemoryFiles();
   for (let n = 0; n < 3; n++) {
     const url = `https://example.com/taxonomy/${n}`, id = await pageId(url);
     const page: Page = { schemaVersion: 1, id, url, originalUrl: url, title: `Article ${n}`, favicon: "",
@@ -23,7 +23,7 @@ async function setup() {
       category: n === 2 ? "未分类" : "游戏设计", tags: n === 2 ? [] : ["旧标签"], annotations: [], comment: "保留评论" };
     const raw = JSON.stringify(page), md = markdown(page);
     lib.entries[id] = { page, baseJson: raw, baseMd: md, dirty: false, mdDirty: false };
-    files.data.set(`原始数据/${id}.json`, raw); files.data.set(page.markdownFile!, md);
+    files.data.set(`data/${id}.json`, raw); files.data.set(page.markdownFile!, md);
   }
   const engine = new SyncEngine(lib, files, async () => {});
   await engine.run();
@@ -147,7 +147,7 @@ it("protects uncategorized, refuses duplicate names and rejects stale catalog ed
 
 it("ignores edited name caches in v2 JSON and follows IDs", async () => {
   const { lib, pages, files, engine } = await setup();
-  files.data.set(`原始数据/${pages[0].id}.json`, JSON.stringify({ ...pages[0], category: "伪分类", tags: ["伪标签"] }));
+  files.data.set(`data/${pages[0].id}.json`, JSON.stringify({ ...pages[0], category: "伪分类", tags: ["伪标签"] }));
   await engine.run();
   expect(lib.entries[pages[0].id].page.tags).toEqual(["旧标签"]);
   expect(lib.taxonomy!.tags.some(x => x.name === "伪标签")).toBe(false);
@@ -187,7 +187,7 @@ it("reloads disk-side renames while preserving relationships", async () => {
 
 it("keeps unknown references visible as conflicts instead of silently reassigning", async () => {
   const { lib, pages, files, engine } = await setup();
-  files.data.set(`原始数据/${pages[0].id}.json`, JSON.stringify({ ...pages[0], tagIds: ["missing"] }));
+  files.data.set(`data/${pages[0].id}.json`, JSON.stringify({ ...pages[0], tagIds: ["missing"] }));
   await engine.run(); expect(lib.entries[pages[0].id].issue?.kind).toBe("invalid");
 });
 
@@ -245,7 +245,7 @@ it("merges pending browser names on first connection without leaving stale page 
   const localTag = ensureTaxon(local, "tags", "旧标签");
   const p = structuredClone(Object.values(diskLib.entries)[0].page);
   p.tagIds = [localTag.id];
-  local.entries[p.id] = { page: p, baseJson: files.data.get(`原始数据/${p.id}.json`)!, baseMd: markdown(p), dirty: false, mdDirty: false };
+  local.entries[p.id] = { page: p, baseJson: files.data.get(`data/${p.id}.json`)!, baseMd: markdown(p), dirty: false, mdDirty: false };
   await new SyncEngine(local, files, async () => {}).run();
   expect(local.entries[p.id].page.tagIds).toEqual(Object.values(diskLib.entries)[0].page.tagIds);
   expect(local.entries[p.id].issue).toBeUndefined();
@@ -257,7 +257,7 @@ it("reconciles repeated checkpoints after importing external ID references witho
   const disk = JSON.parse(files.data.get(TAXONOMY_PATH)!);
   const tag = { id: crypto.randomUUID(), name: "外部新标签" }; disk.tags.push(tag);
   files.data.set(TAXONOMY_PATH, JSON.stringify(disk));
-  files.data.set(`原始数据/${pages[0].id}.json`, JSON.stringify({ ...pages[0], tagIds: [...pages[0].tagIds!, tag.id] }));
+  files.data.set(`data/${pages[0].id}.json`, JSON.stringify({ ...pages[0], tagIds: [...pages[0].tagIds!, tag.id] }));
   let checkpoints = 0;
   await new SyncEngine(lib, files, async () => {
     checkpoints++;

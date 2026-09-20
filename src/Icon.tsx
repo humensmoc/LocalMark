@@ -15,6 +15,8 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
     link: "m9 15 6-6M8 16l-1 1a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0M16 8l1-1a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0",
     trash: "M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7",
     folder: "M3 5h7l2 3h9v13H3V5",
+    download: "M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5",
+    upload: "M12 16V4m-5 5 5-5 5 5M4 17v4h16v-4",
     arrow: "m8 5 7 7-7 7",
   };
   return (

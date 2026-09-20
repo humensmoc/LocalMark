@@ -19,6 +19,8 @@ import { PageTags } from "./PageTags";
 import { PageCategory } from "./PageCategory";
 import { PageComment, type CommentDraft } from "./PageComment";
 import { PageTitle, type TitleDraft } from "./PageTitle";
+import { PageMetadataLocation } from "./PageMetadataLocation";
+import { MetadataImport } from "./MetadataImport";
 import { SiteIcon } from "./SiteIcon";
 import { PageRating, RatingDots } from "./PageRating";
 import { ensurePageBridge } from "./toolbar";
@@ -300,6 +302,10 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
   return (
     <>
       <aside className="panel" aria-label="本地摘录侧栏">
+        <MetadataImport onImported={result => {
+          setLib(result.library);
+          if (result.items.some(item => item.status === "saved" || item.status === "pending")) { setSearch(""); setTab("recent"); }
+        }} />
         <nav className="tabs">
           {(
             [
@@ -438,6 +444,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                   }}
                 />
                 <div className="url">{url}</div>
+                <PageMetadataLocation key={`metadata:${url}`} pageId={current?.id} library={lib} tell={tell} />
                 <PageRating
                   key={`rating:${url}`}
                   rating={current?.rating}
@@ -553,7 +560,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
             <div className="empty">
               尚未保存网页。
               <br />
-              已有 JSON？在设置中连接原文件夹。
+              已有 JSON？连接目录后拖入此侧栏即可导入。
             </div>
           )}
         </div>

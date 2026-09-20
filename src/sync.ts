@@ -9,7 +9,7 @@ import {
 } from "./model";
 import type { Files } from "./files";
 import { initialTaxonomy, migrateTaxonomy, TAXONOMY_PATH, TaxonomySchema, touchTaxonomy } from "./taxonomy";
-const rawPath = (id: string) => `原始数据/${id}.json`;
+const rawPath = (id: string) => `data/${id}.json`;
 const mdPath = (e: Entry) =>
   e.page.markdownFile ?? `${e.page.folderName}/标注.md`;
 const serialize = (e: Entry) => JSON.stringify(e.page, null, 2) + "\n";
@@ -99,7 +99,7 @@ export class SyncEngine {
       seen.add(id);
       const current = this.lib.entries[id];
       try {
-        const raw = await this.files.read(`原始数据/${name}`);
+        const raw = await this.files.read(name.includes("/") ? name : rawPath(id));
         if (raw === null) {
           seen.delete(id);
           continue;
@@ -196,8 +196,9 @@ export class SyncEngine {
       if (e.issue && e.issue.kind !== "io" && e.issue.kind !== "markdown")
         continue;
       try {
+        await this.files.prepareJsonFile?.(id, e.page.title, e.page.createdAt, e.baseJson);
         const needsMarkdown = e.page.annotations.length > 0 || !!e.page.comment?.trim();
-        if (needsMarkdown && !e.page.markdownFile) {
+        if (this.lib.autoGenerateMarkdown === true && needsMarkdown && !e.page.markdownFile) {
           const oldPath = mdPath(e);
           const old = await this.files.read(oldPath);
           if (
@@ -255,6 +256,13 @@ export class SyncEngine {
           e.mdDirty = true;
           await this.persist();
         }
+        // Off means no Markdown reads, writes, migrations, or cleanup. Keep its
+        // last exported base so re-enabling still detects manual edits.
+        if (this.lib.autoGenerateMarkdown !== true) {
+          e.mdDirty = false;
+          delete e.issue;
+          continue;
+        }
         // Check even clean Markdown on refresh, so manual edits cannot be silently adopted.
         const intended = needsMarkdown ? markdown(e.page) : null,
           current = await this.files.read(mdPath(e));
@@ -306,6 +314,8 @@ export class SyncEngine {
       "-" +
       crypto.randomUUID().slice(0, 8);
     if (e.issue.kind === "markdown") {
+      if (this.lib.autoGenerateMarkdown !== true)
+        throw Error("请先在设置中开启自动生成 Markdown 文档。");
       if (choice !== "local")
         throw Error("Markdown 仅提供备份后重新生成；关闭窗口即可继续保留。");
       const current = await this.files.read(mdPath(e));

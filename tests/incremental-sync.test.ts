@@ -11,7 +11,7 @@ import { SyncEngine } from "../src/sync";
 import { mergeSyncResult } from "../src/sync-state";
 
 export async function fixture(count = 1) {
-  const lib = emptyLibrary(),
+  const lib = { ...emptyLibrary(), autoGenerateMarkdown: true },
     data = new Map<string, string>();
   for (let i = 0; i < count; i++) {
     const url = `https://example.com/${i}`,
@@ -36,7 +36,7 @@ export async function fixture(count = 1) {
     const baseJson = JSON.stringify(page, null, 2) + "\n",
       baseMd = markdown(page);
     lib.entries[id] = { page, baseJson, baseMd, dirty: false, mdDirty: false };
-    data.set(`原始数据/${id}.json`, baseJson);
+    data.set(`data/${id}.json`, baseJson);
     data.set(page.markdownFile!, baseMd);
   }
   migrateTaxonomy(lib);
@@ -44,7 +44,7 @@ export async function fixture(count = 1) {
   for (const e of Object.values(lib.entries)) {
     e.baseJson = JSON.stringify(e.page, null, 2) + "\n";
     e.dirty = e.mdDirty = false;
-    data.set(`原始数据/${e.page.id}.json`, e.baseJson);
+    data.set(`data/${e.page.id}.json`, e.baseJson);
   }
   lib.taxonomyBase = JSON.stringify(lib.taxonomy, null, 2) + "\n";
   lib.taxonomyDirty = false;
@@ -57,7 +57,7 @@ export async function fixture(count = 1) {
     async listJson() {
       lists++;
       return [...data.keys()]
-        .filter((p) => p.startsWith("原始数据/"))
+        .filter((p) => p.startsWith("data/"))
         .map((p) => p.split("/")[1]);
     },
     async read(p: string) {
@@ -104,8 +104,8 @@ describe("incremental sync", () => {
     await f.engine.run(new Set([f.id]));
     expect(f.reads).toEqual([
       TAXONOMY_PATH,
-      `原始数据/${f.id}.json`,
-      `原始数据/${f.id}.json`,
+      `data/${f.id}.json`,
+      `data/${f.id}.json`,
       f.entry.page.markdownFile,
     ]);
     expect(f.writes).toHaveLength(2);
@@ -125,7 +125,7 @@ describe("incremental sync", () => {
     "keeps %s conflicts during incremental writes",
     async (kind) => {
       const f = await fixture(2),
-        raw = `原始数据/${f.id}.json`,
+        raw = `data/${f.id}.json`,
         md = f.entry.page.markdownFile!;
       const other = Object.values(f.lib.entries)[1];
       other.issue = { kind: "invalid", message: "unrelated error" };
@@ -161,7 +161,7 @@ describe("incremental sync", () => {
     await f.engine.run(new Set([f.id]));
     expect(f.entry.dirty).toBe(false);
     expect(f.entry.mdDirty).toBe(true);
-    expect(f.entry.baseJson).toBe(f.data.get(`原始数据/${f.id}.json`));
+    expect(f.entry.baseJson).toBe(f.data.get(`data/${f.id}.json`));
     f.files.write = write;
     await f.engine.run(new Set([f.id]));
     expect(f.entry.issue).toBeUndefined();
@@ -184,11 +184,11 @@ describe("concurrent save reconciliation", () => {
     await engine.run(new Set([f.id]));
     expect(latest.entries[f.id].dirty).toBe(true);
     expect(latest.entries[f.id].baseJson).toBe(
-      f.data.get(`原始数据/${f.id}.json`),
+      f.data.get(`data/${f.id}.json`),
     );
     await new SyncEngine(latest, f.files, async () => {}).run(new Set([f.id]));
     expect(latest.entries[f.id].issue).toBeUndefined();
-    expect(JSON.parse(f.data.get(`原始数据/${f.id}.json`)!).tags).toEqual([
+    expect(JSON.parse(f.data.get(`data/${f.id}.json`)!).tags).toEqual([
       "A",
       "B",
     ]);
@@ -201,7 +201,7 @@ describe("concurrent save reconciliation", () => {
     setTags(latest, f.id, ["local"]);
     latest.entries[f.id].dirty = true;
     f.data.set(
-      `原始数据/${f.id}.json`,
+      `data/${f.id}.json`,
       JSON.stringify({ ...f.entry.page, tags: ["disk"], tagIds: [f.lib.taxonomy!.tags.find(x => x.name === "disk")!.id] }),
     );
     await f.engine.run();
