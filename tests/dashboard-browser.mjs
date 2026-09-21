@@ -211,14 +211,15 @@ try {
   await detail.locator(".site-icon img").waitFor();
   ok("switching articles resets icon failure state and restores the correct site artwork");
   await secondCard.click({ position: { x: 8, y: 8 } });
-  await firstCard.locator(".result-annotations summary").click();
-  assert.equal(await firstCard.locator(".result-annotations").getAttribute("open"), "");
-  await detail.getByRole("heading", { name: "Idle 游戏分类学" }).waitFor();
-  await firstCard.locator(".result-annotations summary").click();
+  assert.equal(await firstCard.locator("details, summary").count(), 0);
+  assert.equal(await firstCard.locator(".result-stats").getAttribute("aria-label"), "1 条高亮，1 条批注");
+  await firstCard.locator(".result-stats").click();
+  await detail.getByRole("heading", { name: first }).waitFor();
+  await secondCard.click({ position: { x: 8, y: 8 } });
   await firstCard.getByRole("button", { name: first, exact: true }).focus();
   await firstCard.getByRole("button", { name: first, exact: true }).press("Enter");
   await detail.getByRole("heading", { name: first }).waitFor();
-  ok("whole card padding, comment and tags select details; summary and keyboard controls retain their behavior");
+  ok("whole card padding, comment, tags and enlarged counts select details; removed previews and keyboard controls are correct");
   assert.equal(
     context.pages().filter((p) => p.url().startsWith(base)).length,
     0,
@@ -266,16 +267,32 @@ try {
   const columnWidths = () => page
     .locator(".library-rail, .tag-results, .dashboard-detail")
     .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().width));
-  const gridColumns = () => list.locator(".tag-results").evaluate(
-    (node) => getComputedStyle(node).gridTemplateColumns.split(" ").length,
+  const gridColumns = () => list.locator(".result-card").evaluateAll(
+    (nodes) => new Set(nodes.map(node => Math.round(node.getBoundingClientRect().x))).size,
   );
-  assert.ok(await gridColumns() >= 2, "default dashboard shows multiple cards per row");
-  const cardPositions = await list.locator(".result-card").evaluateAll((nodes) =>
-    nodes.slice(0, 2).map((node) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y }; }),
-  );
-  assert.equal(cardPositions[0].y, cardPositions[1].y);
-  assert.ok(cardPositions[1].x > cardPositions[0].x);
-  const handles = page.getByRole("separator");
+  assert.ok(await gridColumns() >= 2, "default dashboard shows multiple card columns");
+  const assertCompactOrder = async () => {
+    const boxes = await list.locator(".result-card").evaluateAll(nodes => nodes.map(node => {
+      const r = node.getBoundingClientRect();
+      return { x: r.x, y: r.y, bottom: r.bottom };
+    }));
+    const columns = new Map();
+    for (const box of boxes) {
+      const x = Math.round(box.x);
+      const previous = columns.get(x);
+      if (previous) assert.ok(Math.abs(box.y - previous.bottom - 10) < 1, "each card follows the previous card in its column without a row-sized gap");
+      columns.set(x, box);
+    }
+    for (let i = 1; i < boxes.length; i++) {
+      assert.ok(boxes[i].y >= boxes[i - 1].y - 1, "recently modified cards stay above older cards");
+      if (Math.abs(boxes[i].y - boxes[i - 1].y) < 1) assert.ok(boxes[i].x > boxes[i - 1].x, "cards at the same height read left to right");
+    }
+    assert.equal(await list.evaluate(node => node.scrollWidth <= node.clientWidth), true);
+  };
+  await assertCompactOrder();
+  await page.screenshot({ path: join(out, "dashboard-compact-order.png") });
+  ok("cards retain recent-first reading order and pack each column without gaps despite unequal heights");
+  const handles = page.getByRole("separator").and(page.locator('[aria-orientation="vertical"]'));
   const resize = async (index, delta) => {
     const box = await handles.nth(index).boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -301,6 +318,7 @@ try {
   await handles.nth(0).press("End");
   assert.ok(Math.abs((await columnWidths())[1] - 260) < 2);
   assert.equal(await gridColumns(), 1);
+  await assertCompactOrder();
   await handles.nth(0).press("Home");
   assert.ok(Math.abs((await columnWidths())[0] - 160) < 2);
   await handles.nth(1).press("End");
@@ -310,7 +328,7 @@ try {
   await firstCard.getByRole("button", { name: first, exact: true }).click();
   const buildVersion = JSON.parse(await readFile("package.json", "utf8")).version;
   assert.equal(await page.locator(".dashboard-version").textContent(), `v${buildVersion}`);
-  ok("card grid, both draggable dividers, adjacent-only resizing, keyboard limits, reload persistence, reset and build version");
+  ok("card columns, both draggable dividers, adjacent-only resizing, keyboard limits, reload persistence, reset and build version");
   assert.equal(await detail.getByRole("group", { name: "高亮颜色" }).count(), 0);
   assert.equal(await detail.locator(".mark-editor textarea").count(), 0);
   assert.equal(await detail.getByRole("button", { name: "删除高亮", exact: true }).count(), 0);
@@ -799,22 +817,21 @@ try {
   assert.equal(await reopened.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await reopened.screenshot({ path: join(out, "library-narrow.png"), fullPage: true });
   await reopened.setViewportSize({ width: 1440, height: 960 });
-  await view("独立批注");
-  assert.equal(await reopened.locator(".comment-card").count(), 3);
-  assert.equal(await reopened.locator(".content-note").count(), 0);
-  const commentCards = reopened.locator(".comment-card");
-  assert.match(await commentCards.first().locator(".standalone-comment").textContent(), /批注：结合核心循环/);
-  assert.equal(await reopened.locator(".comment-card").filter({ hasText: "另一窗口更新" }).count(), 0, "page descriptions are excluded");
-  await commentCards.first().getByText("查看对应高亮", { exact: true }).click();
-  assert.equal(await commentCards.first().locator("blockquote").isVisible(), true);
-  assert.match(await commentCards.first().locator("blockquote").textContent(), /摘录/);
-  assert.match(await navigation.getByRole("button", { name: /^独立批注/ }).textContent(), /3$/);
-  await reopened.screenshot({ path: join(out, "library-comments.png"), fullPage: true });
-  await reopened.getByRole("textbox", { name: "搜索独立批注" }).fill("不可能匹配的字符串");
+  await view("高亮内容");
+  assert.equal(await navigation.getByRole("button", { name: /^独立批注/ }).count(), 0);
+  assert.equal(await navigation.getByRole("button").count(), 5);
+  assert.equal(await reopened.locator(".content-card").count(), 6);
+  assert.equal(await reopened.locator(".content-note").count(), 3);
+  assert.match(await reopened.locator(".content-note").first().textContent(), /批注：结合核心循环/);
+  assert.equal(await reopened.locator(".content-card").filter({ hasText: "另一窗口更新" }).count(), 0, "page descriptions are excluded");
+  assert.equal(await reopened.locator(".content-page-group").count(), 1);
+  assert.equal(await reopened.locator(".group-page-card .result-taxonomy").count(), 1);
+  assert.equal(await reopened.locator(".group-page-card").count(), 1);
+  await reopened.getByRole("textbox", { name: "搜索高亮内容" }).fill("不可能匹配的字符串");
   await reopened.getByRole("heading", { name: "没有匹配的内容" }).waitFor();
   await view("高亮内容");
   await reopened.screenshot({ path: join(out, "library-highlights.png"), fullPage: true });
-  await reopened.locator(".content-source").first().click();
+  await reopened.locator(".group-page-card .tag-page-title").first().click();
   await reopenedDetail.getByRole("button", { name: "编辑高亮", exact: true }).first().waitFor();
   await reopened.reload();
   await view("颜色");
@@ -834,7 +851,7 @@ try {
   assert.equal(await reopened.getByRole("button", { name: "保存说明", exact: true }).isDisabled(), true);
   await reopened.getByRole("button", { name: "取消修改", exact: true }).click();
   assert.equal(await description.inputValue(), "另一窗口修改的分类说明");
-  ok("six library views, description persistence, draft retention, content search, associations and responsive layouts");
+  ok("five library views, grouped highlights with notes, description persistence, draft retention, search, associations and responsive layouts");
   for (let i = 0; i < 35; i++) {
     const reply = await rpc(reopened, { type: "page-tag", ...common, tag: `筛选密度测试${i + 1}`, action: "add" });
     assert.equal(reply.ok, true, reply.error);

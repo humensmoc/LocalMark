@@ -7,6 +7,7 @@ import {
   canonicalUrl,
   emptyLibrary,
   textLink,
+  compareMarks,
   type Library,
   type Mark,
   type Page,
@@ -22,9 +23,10 @@ import { PageTitle, type TitleDraft } from "./PageTitle";
 import { PageMetadataLocation } from "./PageMetadataLocation";
 import { MetadataImport } from "./MetadataImport";
 import { SiteIcon } from "./SiteIcon";
-import { PageRating, RatingDots } from "./PageRating";
+import { PageRating } from "./PageRating";
+import { PageCard } from "./PageCard";
 import { ensurePageBridge } from "./toolbar";
-import type { PageInfo } from "./page-bridge";
+import { SIDEBAR_PRESENCE_PORT, closeSidePanel, type PageInfo } from "./page-bridge";
 import "./ui.css";
 import "./sidepanel.css";
 declare const __LOCALMARK_VERSION__: string;
@@ -86,6 +88,14 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
   }, [commentDrafts, titleDrafts]);
   useEffect(() => {
     let disposed = false;
+    let presence: { tabId: number; port: chrome.runtime.Port } | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    const disconnectPresence = () => {
+      clearTimeout(reconnectTimer);
+      const previous = presence;
+      presence = undefined;
+      previous?.port.disconnect();
+    };
     async function connect() {
       const g = ++generation.current;
       activeTab.current = undefined;
@@ -94,6 +104,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
       try {
         const [target] = await chrome.tabs.query({ active: true, windowId });
         if (disposed || g !== generation.current) return;
+        if (presence?.tabId !== target?.id) disconnectPresence();
         activeTab.current = target?.id;
         if (!target?.id || !/^https?:\/\//.test(target.url ?? ""))
           throw Error(
@@ -101,6 +112,27 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
           );
         const info = await ensurePageBridge(target.id);
         if (!disposed && g === generation.current) {
+          if (!presence && document.visibilityState === "visible") {
+            const port = chrome.tabs.connect(target.id, { name: SIDEBAR_PRESENCE_PORT, frameId: 0 });
+            presence = { tabId: target.id, port };
+            port.onMessage.addListener(message => {
+              if (message?.type !== "close-sidepanel" || presence?.port !== port) return;
+              void closeSidePanel(windowId).catch(error => {
+                port.postMessage({ type: "close-sidepanel-error", error: String(error) });
+              });
+            });
+            port.onDisconnect.addListener(() => {
+              const error = chrome.runtime.lastError;
+              if (presence?.port !== port) return;
+              presence = undefined;
+              // Navigation can disconnect the old document after onUpdated has
+              // already connected it. Recheck the active page after that race.
+              if (!error && !disposed && document.visibilityState === "visible") {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = setTimeout(() => void connect(), 100);
+              }
+            });
+          }
           setPage(info);
           void load(true);
         }
@@ -110,6 +142,10 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
     }
     const activated = (info: chrome.tabs.TabActiveInfo) => {
       if (info.windowId === windowId) void connect();
+    };
+    const visibility = () => {
+      if (document.visibilityState === "visible") void connect();
+      else disconnectPresence();
     };
     const updated = (id: number, info: chrome.tabs.TabChangeInfo) => {
       if (
@@ -134,14 +170,19 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
     chrome.tabs.onActivated.addListener(activated);
     chrome.tabs.onUpdated.addListener(updated);
     chrome.runtime.onMessage.addListener(message);
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("pagehide", disconnectPresence);
     void load();
     void connect();
     return () => {
       disposed = true;
       generation.current++;
+      disconnectPresence();
       chrome.tabs.onActivated.removeListener(activated);
       chrome.tabs.onUpdated.removeListener(updated);
       chrome.runtime.onMessage.removeListener(message);
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("pagehide", disconnectPresence);
       clearTimeout(toastTimer.current);
     };
   }, []);
@@ -152,7 +193,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
       tell(String(e));
     }
   }
-  async function pageAction(action: "jump" | "edit" | "rebind", m: Mark) {
+  async function pageAction(action: "jump" | "edit" | "rebind" | "pick-element" | "cancel-pick", m?: Mark) {
     const id = activeTab.current;
     if (!id || !page) return;
     try {
@@ -161,7 +202,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
         throw Error("页面已切换，请稍后重试。");
       const reply = await chrome.tabs.sendMessage(
         id,
-        { type: "page-action", action, id: m.id, url },
+        { type: "page-action", action, id: m?.id, url },
         { frameId: 0 },
       );
       if (!reply?.ok) throw Error(reply?.error ?? "网页未连接，请刷新网页。");
@@ -199,7 +240,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
         input.remove();
         if (!ok) throw Error("copy failed");
       }
-      tell("已复制原文高亮链接（不包含批注）");
+      tell(m.anchor.kind === "element" ? "已复制网页链接；元素框和批注需导入对应 JSON 后查看。" : "已复制原文高亮链接（不包含批注）");
     } catch {
       tell("无法访问剪贴板，请允许此网页的剪贴板权限。");
     }
@@ -236,6 +277,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
       className="card current"
       style={{ "--mark": COLORS[m.color].hex } as React.CSSProperties}
     >
+      {m.anchor.kind === "element" && <small className="element-kind">元素 · {m.anchor.tag}</small>}
       {p.url !== url && (
         <button className="title muted" onClick={() => jump(p, m)}>
           {p.title}
@@ -250,11 +292,14 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
           if (e.key === "Enter") jump(p, m);
         }}
       >
-        {m.text}
+        {p.url === url ? page?.excerpts?.[m.id] ?? m.text : m.text}
       </div>
       {m.note && <div className="note">{m.note}</div>}
+      {p.url === url && page?.approximate?.includes(m.id) && (
+        <div className="hint">已定位到对应段落 · 虚线标记</div>
+      )}
       <div className="row tools wrap">
-        <button title="复制定位链接" onClick={() => void copy(p, m)}>
+        <button title={m.anchor.kind === "element" ? "复制网页链接" : "复制定位链接"} onClick={() => void copy(p, m)}>
           <Icon name="link" size={14} />
           链接
         </button>
@@ -301,8 +346,13 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
 
   return (
     <>
-      <aside className="panel" aria-label="本地摘录侧栏">
-        <MetadataImport onImported={result => {
+      <aside className="panel" aria-label="本地摘录侧栏" onKeyDown={e => {
+        if (e.key === "Escape" && page?.picking) {
+          e.preventDefault();
+          void pageAction("cancel-pick");
+        }
+      }}>
+        <MetadataImport showButton={false} onImported={result => {
           setLib(result.library);
           if (result.items.some(item => item.status === "saved" || item.status === "pending")) { setSearch(""); setTab("recent"); }
         }} />
@@ -341,43 +391,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
               {pages
                 .filter((p) => matches(p))
                 .map((p) => (
-                  <article className="card page-surface" key={p.id}>
-                    <SiteIcon site={p} backdrop />
-                    <div className="row">
-                      <SiteIcon site={p} />
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <button
-                          className="title"
-                          onClick={() =>
-                            void request({ type: "open", url: p.url }).catch(
-                              (e) => tell(String(e)),
-                            )
-                          }
-                        >
-                          {p.title}
-                        </button>
-                        <div className="rated-url"><div className="url">{p.url}</div><RatingDots rating={p.rating} /></div>
-                      </div>
-                    </div>
-                    {p.comment?.trim() && (
-                      <div className="note page-comment-preview">
-                        {p.comment}
-                      </div>
-                    )}
-                    <div className="row wrap" style={{ marginTop: 12 }}>
-                      <span className="badge">主分类：{p.category}</span>
-                      <span className="badge">
-                        {p.annotations.length} 条高亮
-                      </span>
-                      <span className="badge">
-                        {p.annotations.filter((a) => a.note.trim()).length}{" "}
-                        条批注
-                      </span>
-                      <small>
-                        {new Date(p.updatedAt).toLocaleDateString()}
-                      </small>
-                    </div>
-                  </article>
+                  <PageCard page={p} key={p.id} open={page => void request({ type: "open", url: page.url }).catch(e => tell(String(e)))} />
                 ))}
             </>
           )}
@@ -396,7 +410,6 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                   tell(String(e)),
                 )
               }
-              annotation={card}
             />
           )}
           {tab === "current" && !page && (
@@ -543,7 +556,10 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
               </div>
               {current?.annotations
                 .slice()
-                .sort((a, b) => a.anchor.start - b.anchor.start)
+                .sort((a, b) => {
+                  const ai = page.located.indexOf(a.id), bi = page.located.indexOf(b.id);
+                  return ai >= 0 && bi >= 0 ? ai - bi : ai >= 0 ? -1 : bi >= 0 ? 1 : compareMarks(a, b);
+                })
                 .filter((m) => matches(current, m))
                 .map((m) => card(current, m))}
               {!current?.annotations.length && (

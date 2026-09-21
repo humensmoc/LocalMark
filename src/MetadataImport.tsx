@@ -5,7 +5,10 @@ import { request } from "./protocol";
 import { IMPORT_MAX_BYTES, IMPORT_MAX_FILES, importMetadata, type ImportItem, type ImportResult } from "./metadata-import";
 import "./metadata-import.css";
 
-export function MetadataImport({ onImported }: { onImported: (result: ImportResult) => void }) {
+export function MetadataImport({ onImported, showButton = true }: {
+  onImported: (result: ImportResult) => void;
+  showButton?: boolean;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const running = useRef(false);
@@ -89,17 +92,16 @@ export function MetadataImport({ onImported }: { onImported: (result: ImportResu
   useEffect(() => { if (report && !dialog.current?.open) dialog.current?.showModal(); }, [report]);
   const labels = { saved: "已导入", pending: "待同步", skipped: "已跳过", error: "失败" } as const;
   return <>
-    <div className="metadata-import-entry">
+    {showButton && <div className="metadata-import-entry">
       <button onClick={() => input.current?.click()} disabled={busy} title="选择文件，或将一个或多个 JSON 拖入此窗口">
         <Icon name="upload" size={14} />{busy ? "正在导入…" : "导入 JSON"}
       </button>
-      <small>支持拖入多个 JSON</small>
       <input ref={input} type="file" accept=".json,application/json" multiple hidden aria-label="选择元数据 JSON"
         onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ""; if (files.length) void importFiles(files); }} />
-    </div>
+    </div>}
     {dragging && createPortal(<div className="metadata-drop-overlay" role="status">
       <strong>{busy ? "正在处理上一批文件" : "松开以导入 JSON"}</strong>
-      <p>支持一个或多个文章元数据文件，保存到当前连接目录</p>
+      <p>支持拖入一个或多个 JSON</p>
     </div>, document.body)}
     {report && createPortal(<dialog ref={dialog} className="metadata-import-report" aria-labelledby="metadata-import-title"
       onCancel={() => setReport(undefined)}>

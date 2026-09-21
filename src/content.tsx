@@ -4,23 +4,29 @@ import {
   COLORS,
   canonicalUrl,
   emptyLibrary,
+  pageToolEnabled,
   textLink,
-  type Anchor,
+  type MarkAnchor,
   type Color,
   type Library,
   type Mark,
   type Page,
 } from "./model";
-import { capture, HOST, Painter } from "./anchors";
+import { captureSelection, HOST, Painter } from "./anchors";
+import { captureElement, locateElement } from "./element-anchors";
+import { ElementOverlays, ElementPicker, ElementPickButton, AnnotationVisibilityButton, SidePanelButton } from "./ElementUI";
 import { request } from "./protocol";
 import { Icon } from "./Icon";
-import { Floating } from "./Floating";
+import { Floating, FloatingPresence } from "./Floating";
 import style from "./ui.css?inline";
-import type { PageInfo, PageAction } from "./page-bridge";
+import { type PageInfo, type PageAction } from "./page-bridge";
+import { useSidePanelToggle } from "./useSidePanelToggle";
 // Embed this content script's build version, even if the extension is later reloaded.
 declare const __LOCALMARK_VERSION__: string;
 type Draft = {
-  anchor: Anchor;
+  anchor: MarkAnchor;
+  element?: HTMLElement;
+  validateElement?: boolean;
   text?: string;
   note: string;
   color: Color;
@@ -53,6 +59,10 @@ function App() {
       y: number;
     } | null>(null),
     [rebind, setRebind] = useState<Mark | null>(null),
+    [picking, setPicking] = useState(false),
+    [libraryReady, setLibraryReady] = useState(false),
+    [marksVisible, setMarksVisible] = useState(true),
+    [focused, setFocused] = useState<string | undefined>(),
     [toast, setToast] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -60,36 +70,99 @@ function App() {
   const current = Object.values(lib.entries).find(
     (e) => e.page.url === url,
   )?.page;
-  const snapshot = useRef({ lib, current, draft, rebind, url });
-  snapshot.current = { lib, current, draft, rebind, url };
+  const snapshot = useRef({ lib, current, draft, rebind, url, picking, marksVisible });
+  snapshot.current = { lib, current, draft, rebind, url, picking, marksVisible };
   const refreshGeneration = useRef(0),
     quickRef = useRef<HTMLDivElement>(null),
+    elementButtonRef = useRef<HTMLButtonElement>(null),
+    hoverPoint = useRef({ x: 0, y: 0 }),
+    noteRef = useRef<HTMLTextAreaElement>(null),
     toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     expandTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const keepHover = () => { clearTimeout(hoverTimer.current); hoverTimer.current = undefined; };
+  const leaveHover = () => {
+    if (hoverTimer.current) return;
+    hoverTimer.current = setTimeout(() => {
+      hoverTimer.current = undefined;
+      setHover(null);
+    }, 60);
+  };
   const tell = (text: string) => {
     setToast(text);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 4500);
   };
+  const sidebar = useSidePanelToggle(tell);
+  const showElementButton = pageToolEnabled(lib, "element");
+  const showVisibilityButton = pageToolEnabled(lib, "visibility");
   async function load(refresh = false) {
     const g = ++refreshGeneration.current;
     try {
       const next = await request({ type: "snapshot", refresh });
-      if (g === refreshGeneration.current) setLib(next);
+      if (g === refreshGeneration.current) { setLib(next); setLibraryReady(true); }
     } catch (e) {
       tell(String(e));
     }
   }
   const pageInfo = (): PageInfo => ({ ready: true, url: canonicalUrl(location.href), title: document.title,
     favicon: document.querySelector<HTMLLinkElement>('link[rel~="icon"]')?.href ?? "",
-    version: __LOCALMARK_VERSION__, located: [...painter.ranges.keys()] });
+    version: __LOCALMARK_VERSION__, located: painter.orderedIds(), approximate: [...painter.approximate], excerpts: Object.fromEntries(painter.excerpts), picking: snapshot.current.picking });
   const publish = () => { void chrome.runtime.sendMessage({ type: "page-updated", page: pageInfo() }).catch(() => {}); };
+  useEffect(() => { publish(); }, [picking]);
+  useEffect(() => {
+    if (!focused) return;
+    const timer = setTimeout(() => setFocused(undefined), 1600);
+    return () => clearTimeout(timer);
+  }, [focused]);
+  function beginPick(mark: Mark | null = null) {
+    if (snapshot.current.draft) throw Error("请先保存或取消当前批注，再选择元素。");
+    clearTimeout(hoverTimer.current);
+    clearTimeout(expandTimer.current);
+    setRebind(mark);
+    setHover(null);
+    setOverlaps(null);
+    setError("");
+    getSelection()?.removeAllRanges();
+    setPicking(true);
+  }
+  function cancelPick() { setPicking(false); setRebind(null); }
+  function changeMarkVisibility(visible: boolean) {
+    clearTimeout(hoverTimer.current);
+    setMarksVisible(visible);
+    setHover(null);
+    setOverlaps(null);
+    setFocused(undefined);
+  }
+  useEffect(() => {
+    if (!showElementButton) cancelPick();
+    if (!showVisibilityButton) changeMarkVisibility(true);
+  }, [showElementButton, showVisibilityButton]);
+  function selectElement(element: HTMLElement) {
+    try {
+      const anchor = captureElement(element);
+      const selectionUrl = canonicalUrl(location.href);
+      const binding = snapshot.current.url === selectionUrl ? snapshot.current.rebind : null;
+      const rect = element.getBoundingClientRect();
+      setUrl(selectionUrl);
+      setDraft({ anchor, element, validateElement: true, text: binding?.text ?? anchor.exact,
+        note: binding?.note ?? "", color: binding?.color ?? snapshot.current.lib.lastColor,
+        id: binding?.id, expectedUpdatedAt: binding?.updatedAt,
+        expectedMark: binding ? JSON.stringify(binding) : undefined,
+        x: Math.max(12, Math.min(rect.right + 12, innerWidth - 340)),
+        y: Math.max(12, Math.min(rect.top, innerHeight - 350)), expanded: true, url: selectionUrl });
+      setPicking(false);
+      setRebind(null);
+    } catch (error) { tell(error instanceof Error ? error.message : String(error)); }
+  }
   useEffect(() => {
     // A selection can arrive before the SPA URL poll. Keep a draft captured on
     // the new URL while discarding only drafts belonging to the previous page.
     setDraft((active) => active?.url === url ? active : null);
     setRebind(null);
+    setPicking(false);
+    setFocused(undefined);
+    setMarksVisible(true);
     setHover(null);
     setOverlaps(null);
     painter.clear();
@@ -109,20 +182,31 @@ function App() {
       }
       if (m.type === "page-action" && "action" in m) {
         if (m.url !== canonicalUrl(location.href)) { reply({ ok: false, error: "页面已切换，请稍后重试。" }); return; }
+        if (m.action === "pick-element" || m.action === "cancel-pick") {
+          try { m.action === "cancel-pick" ? cancelPick() : beginPick(); reply({ ok: true }); }
+          catch (error) { reply({ ok: false, error: String(error) }); }
+          return;
+        }
         const mark = snapshot.current.current?.annotations.find(a => a.id === m.id);
         if (!mark) { reply({ ok: false, error: "标注已改变，请刷新侧栏后重试。" }); return; }
         if (m.action === "jump" && !painter.jump(mark.id)) { reply({ ok: false, error: "暂未找到原文，请使用重新绑定。" }); return; }
+        if (m.action === "jump") setFocused(mark.id);
         if (m.action === "edit") edit(mark);
-        if (m.action === "rebind") { setRebind(mark); setDraft(null); }
+        if (m.action === "rebind") {
+          if (snapshot.current.draft) { reply({ ok: false, error: "请先保存或取消当前批注。" }); return; }
+          if (mark.anchor.kind === "element") beginPick(mark);
+          else { setRebind(mark); setPicking(false); }
+        }
         reply({ ok: true });
       }
     };
     chrome.runtime.onMessage.addListener(onMessage);
-    let paintTimer: ReturnType<typeof setTimeout>;
+    let paintTimer: ReturnType<typeof setTimeout> | undefined;
     let lastUrl = canonicalUrl(location.href);
     const repaint = () => {
-      clearTimeout(paintTimer);
+      if (paintTimer) return;
       paintTimer = setTimeout(() => {
+        paintTimer = undefined;
         painter.paint(snapshot.current.current?.annotations ?? []);
         setGeometry((v) => v + 1);
         publish();
@@ -139,10 +223,11 @@ function App() {
       )
         repaint();
     });
-    observer.observe(document.body, {
+    observer.observe(document.documentElement, {
       subtree: true,
       childList: true,
       characterData: true,
+      attributes: true,
     });
     const interval = setInterval(() => {
       if (!chrome.runtime.id || !instance.host?.isConnected) {
@@ -157,12 +242,15 @@ function App() {
       }
     }, 500);
     let frame = 0;
+    let lastPointer: { x: number; y: number } | null = null;
     const layout = () => {
       if (!frame)
         frame = requestAnimationFrame(() => {
           frame = 0;
           setGeometry((v) => v + 1);
-          setHover(null);
+          // A scroll can arrive after mousemove (including browser auto-scroll).
+          // Recheck the stationary pointer instead of erasing its freshly opened note.
+          if (lastPointer) move(new MouseEvent("mousemove", { clientX: lastPointer.x, clientY: lastPointer.y }));
         });
     };
     document.addEventListener("scroll", layout, true);
@@ -170,6 +258,7 @@ function App() {
     document.addEventListener("load", layout, true);
     const up = (e: MouseEvent) => {
       if (
+        snapshot.current.picking || snapshot.current.rebind?.anchor.kind === "element" || snapshot.current.draft?.anchor.kind === "element" ||
         e.button !== 0 ||
         e.composedPath().some((n) => n instanceof Element && n.id === HOST)
       )
@@ -185,8 +274,10 @@ function App() {
       if (!selection || selection.isCollapsed || !selection.rangeCount) return;
       const r = selection.getRangeAt(0).cloneRange();
       if (r.commonAncestorContainer.parentElement?.closest("#" + HOST)) return;
-      const a = capture(r);
-      if (!a) return;
+      const captured = captureSelection(r);
+      if (!captured) return;
+      const a = captured.anchor;
+      if (captured.warning) tell(captured.warning);
       const selectionUrl = canonicalUrl(location.href);
       const binding = snapshot.current.url === selectionUrl ? snapshot.current.rebind : null;
       setUrl(selectionUrl);
@@ -195,7 +286,7 @@ function App() {
       setOverlaps(null);
       setDraft({
         anchor: a,
-        text: binding && binding.text !== binding.anchor.exact ? binding.text : undefined,
+        text: binding && binding.text !== binding.anchor.exact ? binding.text : captured.text,
         note: binding?.note ?? "",
         color: binding?.color ?? snapshot.current.lib.lastColor,
         id: binding?.id,
@@ -208,35 +299,61 @@ function App() {
       });
     };
     const move = (e: MouseEvent) => {
+      lastPointer = { x: e.clientX, y: e.clientY };
+      const pointPath = (skipOverlay = false): EventTarget[] => {
+        const path: EventTarget[] = [];
+        let element: Element | null = document.elementsFromPoint(e.clientX, e.clientY)
+          .find(element => !skipOverlay || element !== instance.host) ?? null;
+        while (element) { path.push(element); element = element.parentElement; }
+        return path;
+      };
+      let path = e.composedPath();
+      if (!path.length) path = pointPath();
       if (
-        snapshot.current.draft ||
-        e.composedPath().some((n) => n instanceof Element && n.id === HOST)
+        !snapshot.current.marksVisible ||
+        snapshot.current.picking ||
+        snapshot.current.draft
       )
         return;
-      clearTimeout(hoverTimer.current);
-      const ids = painter.hit(e.clientX, e.clientY);
+      let overTooltip = false;
+      if (path.some((n) => n instanceof Element && n.id === HOST)) {
+        const target = instance.shadow?.elementFromPoint(e.clientX, e.clientY);
+        if (target?.closest(".tooltip")) {
+          // Fast diagonal motion can catch the previous popup. Keep tracking if
+          // the mark is still underneath; otherwise allow reading/scrolling it.
+          overTooltip = true;
+          path = pointPath(true);
+        } else {
+          if (target?.closest(".element-note-button, .rail")) keepHover();
+          else leaveHover();
+          return;
+        }
+      }
+      // Use the actual event path so covered elements do not claim hover.
+      // Keep nested marks separate, with the innermost element first.
+      const elements = [...painter.elements].filter(([, element]) => path.includes(element))
+        .sort((a, b) => path.indexOf(a[1]) - path.indexOf(b[1])).map(([id]) => id);
+      const ids = [...painter.hit(e.clientX, e.clientY), ...elements];
       if (!ids.length) {
-        hoverTimer.current = setTimeout(() => setHover(null), 180);
+        if (overTooltip) keepHover();
+        else leaveHover();
         return;
       }
-      hoverTimer.current = setTimeout(
-        () =>
-          setHover({
-            ids,
-            x: Math.min(e.clientX + 14, innerWidth - 320),
-            y: Math.max(10, Math.min(e.clientY + 20, innerHeight - 240)),
-          }),
-        220,
-      );
+      keepHover();
+      hoverPoint.current = { x: e.clientX, y: e.clientY };
+      // Coordinates go directly to the floating layer; only target changes rerender marks.
+      setHover(previous => previous && previous.ids.join(",") === ids.join(",")
+        ? previous : { ids, x: e.clientX, y: e.clientY });
     };
     const click = (e: MouseEvent) => {
+      if (snapshot.current.picking) return;
       if (e.composedPath().some((n) => n instanceof Element && n.id === HOST))
         return;
       if (!getSelection()?.isCollapsed) return;
       const hits = painter.hit(e.clientX, e.clientY);
       if (!hits.length) {
         setHover(null);
-        setDraft(null);
+        if (snapshot.current.draft?.anchor.kind !== "element") setDraft(null);
         setOverlaps(null);
         return;
       }
@@ -250,12 +367,17 @@ function App() {
     };
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        clearTimeout(hoverTimer.current);
         setDraft(null);
         setHover(null);
         setOverlaps(null);
         setRebind(null);
+        setPicking(false);
       }
     };
+    const leavePage = () => { lastPointer = null; keepHover(); setHover(null); };
+    document.addEventListener("mouseleave", leavePage);
+    window.addEventListener("blur", leavePage);
     document.addEventListener("mouseup", up);
     document.addEventListener("mousemove", move);
     document.addEventListener("click", click, true);
@@ -278,18 +400,25 @@ function App() {
       document.removeEventListener("mousemove", move);
       document.removeEventListener("click", click, true);
       document.removeEventListener("keydown", key, true);
+      document.removeEventListener("mouseleave", leavePage);
+      window.removeEventListener("blur", leavePage);
       painter.clear();
     };
   }, []);
   useEffect(() => {
+    painter.setVisible(marksVisible);
     painter.paint(current?.annotations ?? []);
     publish();
     setGeometry((v) => v + 1);
-  }, [current]);
+  }, [current, marksVisible]);
   const edit = (m: Mark, x = innerWidth / 2 - 160, y = 100) => {
+    clearTimeout(hoverTimer.current);
     setError("");
+    setPicking(false);
+    setRebind(null);
     setDraft({
       anchor: m.anchor,
+      element: painter.elements.get(m.id),
       text: m.text,
       note: m.note,
       color: m.color,
@@ -315,6 +444,10 @@ function App() {
     const d = draft;
     if (d.url !== canonicalUrl(location.href)) {
       setError("页面已改变，请重新选择文字");
+      return;
+    }
+    if (d.anchor.kind === "element" && d.validateElement && locateElement(d.anchor) !== d.element) {
+      setError("所选元素已改变，请取消后重新选择。批注内容尚未保存。");
       return;
     }
     setBusy(true);
@@ -376,16 +509,41 @@ function App() {
     }
     if (!painter.jump(m.id))
       tell("暂未找到原文。可点击“重新绑定”后选择对应文字。");
+    else setFocused(m.id);
   }
+  const hoverComments = (hover?.ids ?? []).flatMap(id => {
+    const mark = current?.annotations.find(annotation => annotation.id === id);
+    return mark ? [mark] : [];
+  });
   return (
     <>
-      <div
+      {libraryReady && <div className="page-tools" role="group" aria-label="网页工具">
+      {showVisibilityButton && <AnnotationVisibilityButton visible={marksVisible} toggle={() => changeMarkVisibility(!marksVisible)} />}
+      {showElementButton && <ElementPickButton picking={picking} toggle={() => {
+        try { picking ? cancelPick() : beginPick(); }
+        catch (error) { tell(error instanceof Error ? error.message : String(error)); }
+      }} />}
+      {pageToolEnabled(lib, "sidebar") && <SidePanelButton {...sidebar} />}
+      </div>}
+      {marksVisible && !picking && <ElementOverlays focused={focused}
+        hovered={!draft && !overlaps ? hover?.ids : []} buttonRef={elementButtonRef}
+        keepHover={keepHover} leaveHover={leaveHover}
+        items={(current?.annotations ?? []).flatMap(m => {
+          const element = painter.elements.get(m.id);
+          return element && draft?.id !== m.id ? [{ id: m.id, element, color: m.color, label: m.text }] : [];
+        })}
+        edit={(id, x, y) => { const mark = current?.annotations.find(m => m.id === id); if (mark) edit(mark, x, y); }} />}
+      {draft?.anchor.kind === "element" && draft.element && <ElementOverlays preview items={[
+        { id: "draft", element: draft.element, color: draft.color },
+      ]} />}
+      {picking && <ElementPicker color={rebind?.color ?? lib.lastColor} select={selectElement} cancel={cancelPick} />}
+      {marksVisible && <div
         className="rail"
         style={{ left: "2px" }}
         data-geometry={geometry}
       >
         {current?.annotations.map((m) => {
-          const range = painter.ranges.get(m.id);
+          const range = painter.target(m.id);
           if (!range) return null;
           const top = Math.max(
             0,
@@ -402,31 +560,32 @@ function App() {
               aria-label={"定位：" + m.text.slice(0, 25)}
               style={{ top: top + "%", background: COLORS[m.color].hex }}
               onMouseEnter={(e) => {
-                if (draft) return;
-                clearTimeout(hoverTimer.current);
-                const rect = e.currentTarget.getBoundingClientRect();
-                setHover({ ids: [m.id], x: rect.right + 10, y: rect.top });
+                if (draft || picking) return;
+                keepHover();
+                hoverPoint.current = { x: e.clientX, y: e.clientY };
+                setHover({ ids: [m.id], x: e.clientX, y: e.clientY });
               }}
-              onMouseLeave={() => {
-                hoverTimer.current = setTimeout(() => setHover(null), 180);
-              }}
+              onMouseMove={e => { hoverPoint.current = { x: e.clientX, y: e.clientY }; }}
+              onMouseLeave={leaveHover}
               onFocus={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
-                setHover({ ids: [m.id], x: rect.right + 10, y: rect.top });
+                keepHover();
+                hoverPoint.current = { x: rect.right, y: rect.top };
+                setHover({ ids: [m.id], x: rect.right, y: rect.top });
               }}
               onBlur={() => setHover(null)}
               onClick={() => jump(current, m)}
             />
           );
         })}
-      </div>
-      {rebind && !draft && (
+      </div>}
+      {rebind && !draft && !picking && (
         <div className="rebind row">
           请在原文重新选中这条标注对应的文字
           <button onClick={() => setRebind(null)}>取消</button>
         </div>
       )}
-      {draft && !draft.id && (
+      <FloatingPresence>{draft && !draft.id && draft.anchor.kind !== "element" && (
         <Floating
           className="quick"
           elementRef={quickRef}
@@ -456,21 +615,27 @@ function App() {
             <Icon name="pen" />
           </button>
         </Floating>
-      )}
-      {draft?.expanded && (
+      )}</FloatingPresence>
+      <FloatingPresence>{draft?.expanded && (
         <Floating
           className="editor"
           x={draft.x}
           y={draft.y}
-          anchorRef={draft.id ? undefined : quickRef}
+          anchorRef={draft.id || draft.anchor.kind === "element" ? undefined : quickRef}
+          focusRef={noteRef}
+          draggable
+          positionKey={draft.anchor}
         >
-          <div className="row spread">
-            <b>{draft.id ? "编辑标注" : "新建标注"}</b>
+          <div className="row spread editor-header" data-floating-drag-handle title="按住标题栏拖动面板">
+            <b>{draft.anchor.kind === "element" ? (draft.id ? "编辑元素标注" : "新建元素标注") : (draft.id ? "编辑标注" : "新建标注")}</b>
             <button aria-label="关闭编辑窗" onClick={() => setDraft(null)}>
               <Icon name="close" size={16} />
             </button>
           </div>
-          <div className="excerpt">{draft.anchor.exact}</div>
+          <div className="excerpt">{draft.id ? painter.excerpts.get(draft.id) ?? draft.text ?? draft.anchor.exact : draft.text ?? draft.anchor.exact}</div>
+          {draft.anchor.kind !== "element" && draft.anchor.segments?.some(s => s.translation) && (
+            <div className="hint">已关联英文原文；关闭翻译或译文变化时，使用虚线标记对应段落。</div>
+          )}
           <label>高亮颜色</label>
           <div className="row colors">
             {Object.entries(COLORS).map(([key, c]) => (
@@ -487,6 +652,7 @@ function App() {
           </div>
           <label htmlFor="wc-note">批注</label>
           <textarea
+            ref={noteRef}
             id="wc-note"
             placeholder="写下你的想法…"
             value={draft.note}
@@ -527,8 +693,8 @@ function App() {
             </button>
           </div>
         </Floating>
-      )}
-      {overlaps && overlaps.ids.length > 1 && (
+      )}</FloatingPresence>
+      <FloatingPresence>{overlaps && overlaps.ids.length > 1 && (
         <Floating className="overlaps" x={overlaps.x} y={overlaps.y}>
           <b>此处有 {overlaps.ids.length} 条重叠标注</b>
           {overlaps.ids.map((id) => {
@@ -548,31 +714,24 @@ function App() {
             );
           })}
         </Floating>
-      )}
-      {hover && !draft && !overlaps && (
+      )}</FloatingPresence>
+      <FloatingPresence>{hover && hoverComments.length > 0 && !draft && !overlaps && (
         <Floating
           className="tooltip"
           x={hover.x}
           y={hover.y}
-          onMouseEnter={() => clearTimeout(hoverTimer.current)}
-          onMouseLeave={() => setHover(null)}
+          pointerPosition={hoverPoint}
+          positionKey={hover.ids.join(",")}
+          onMouseEnter={keepHover}
+          onMouseLeave={leaveHover}
         >
-          {hover.ids.map((id) => {
-            const m = current?.annotations.find((a) => a.id === id);
-            return (
-              m && (
-                <div key={id}>
-                  <b style={{ color: COLORS[m.color].hex }}>
-                    {COLORS[m.color].name}
-                  </b>
-                  <p className="hover-quote">{m.text}</p>
-                  {m.note && <p className="hover-note">{m.note}</p>}
-                </div>
-              )
-            );
-          })}
+          {hoverComments.map(mark => (
+            <p key={mark.id} data-hover-mark={mark.id} className="hover-note">
+              {mark.note.trim() ? mark.note : "无评论"}
+            </p>
+          ))}
         </Floating>
-      )}
+      )}</FloatingPresence>
       {toast && (
         <div className="toast" role="status" onClick={() => setToast("")}>
           {toast}

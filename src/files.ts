@@ -85,7 +85,8 @@ export class DirectoryFiles implements Files {
     }
     return { dir, name: parts.at(-1)! };
   }
-  private async readFile(path: string) {
+  // Exact paths are also used by reviewed exports, without stable-ID alias lookup.
+  async readFile(path: string) {
     try {
       const { dir, name } = await this.parent(path);
       const file = await (await dir.getFileHandle(name)).getFile();
@@ -109,7 +110,7 @@ export class DirectoryFiles implements Files {
     }
     return result;
   }
-  private async writeFile(path: string, value: string) {
+  async writeFile(path: string, value: string) {
     const { dir, name } = await this.parent(path, true);
     const file = await dir.getFileHandle(name, { create: true });
     const writer = await file.createWritable();
@@ -139,7 +140,7 @@ export class DirectoryFiles implements Files {
       return id ? `${id}.json` : path;
     }))];
   }
-  private async removeFile(path: string) {
+  async removeFile(path: string) {
     const { dir, name } = await this.parent(path);
     await dir.removeEntry(name);
     const parts = path.split("/");

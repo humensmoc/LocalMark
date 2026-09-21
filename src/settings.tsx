@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as db from "./db";
-import { emptyLibrary, type Entry, type Library } from "./model";
+import { emptyLibrary, PAGE_TOOLS, pageToolEnabled, type Entry, type Library } from "./model";
 import { request } from "./protocol";
 import { Icon } from "./Icon";
 import "./settings.css";
@@ -105,6 +105,23 @@ function Settings() {
         <h2>集中整理文章</h2>
         <p>在大窗口中筛选文章，编辑分类、标签、网页评论和高亮批注。</p>
         <button className="primary" onClick={() => void run(() => request({ type: "dashboard" }))}>打开文章管理</button>
+      </section>
+      <section>
+        <h2>网页标注工具</h2>
+        <p>网页右侧的按钮默认显示，可分别开启或隐藏，设置会立即应用到已打开的网页。</p>
+        {PAGE_TOOLS.map(tool => <div className="markdown-setting" key={tool.id}>
+          <div>
+            <label htmlFor={`show-page-tool-${tool.id}`}>{tool.label}</label>
+            <p id={`page-tool-${tool.id}-help`}>{tool.description}</p>
+          </div>
+          <div className="setting-control">
+            <span>{pageToolEnabled(lib, tool.id) ? "已开启" : "已关闭"}</span>
+            <input id={`show-page-tool-${tool.id}`} className="setting-switch" type="checkbox" role="switch"
+              aria-describedby={`page-tool-${tool.id}-help`} checked={pageToolEnabled(lib, tool.id)} disabled={busy}
+              onChange={event => { const enabled = event.target.checked;
+                void run(() => request({ type: "show-page-tools", tool: tool.id, enabled })); }} />
+          </div>
+        </div>)}
       </section>
       <section>
         <h2>连接你的本地文件夹</h2>

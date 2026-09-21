@@ -4,6 +4,7 @@ import { readFile, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
+import { checkBulkExport } from "./bulk-export-checks.mjs";
 
 const out = resolve("test-results");
 await mkdir(out, { recursive: true });
@@ -38,7 +39,10 @@ const ok = (name) => {
   checks.push(name);
   console.log("PASS", name);
 };
-context.on("page", (p) => p.on("pageerror", (e) => errors.push(e.message)));
+context.on("page", (p) => {
+  p.on("pageerror", (e) => errors.push(e.message));
+  p.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+});
 try {
   const manager = await context.newPage();
   await manager.goto("chrome://extensions");
@@ -198,26 +202,37 @@ try {
   await page.screenshot({ path: join(out, "selection-default-wide.png"), fullPage: true });
   for (const width of [1440, 320]) {
     await page.setViewportSize({ width, height: 960 });
-    const toolbarBox = await modeToolbar.boundingBox();
-    const buttonBox = await modeToolbar.getByRole("button", { name: "多选", exact: true }).boundingBox();
-    assert.ok(Math.abs(toolbarBox.x + toolbarBox.width - buttonBox.x - buttonBox.width - 12) <= 2);
+    // Read both rectangles in one frame after the requested viewport is active.
+    const boxesHandle = await page.waitForFunction(expectedWidth => {
+      if (innerWidth !== expectedWidth) return false;
+      const summary = document.querySelector(".result-heading > b")?.getBoundingClientRect();
+      const button = document.querySelector(".result-heading .bulk-mode-toggle")?.getBoundingClientRect();
+      return summary && button && Math.abs(summary.y + summary.height / 2 - button.y - button.height / 2) < 2
+        ? { summaryBox: summary.toJSON(), buttonBox: button.toJSON() } : false;
+    }, width);
+    const { summaryBox, buttonBox } = await boxesHandle.jsonValue();
+    await boxesHandle.dispose();
+    assert.ok(Math.abs(summaryBox.y + summaryBox.height / 2 - buttonBox.y - buttonBox.height / 2) < 2);
+    assert.ok(buttonBox.x >= summaryBox.x + summaryBox.width && buttonBox.x - summaryBox.x - summaryBox.width < 16);
+    assert.equal(await modeToolbar.count(), 0, "no empty toolbar row outside multi-select mode");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
   await page.screenshot({ path: join(out, "selection-default-320.png"), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 960 });
-  await modeToolbar.getByRole("button", { name: "多选", exact: true }).click();
+  await page.locator(".result-heading").getByRole("button", { name: "多选", exact: true }).click();
   await modeToolbar.getByText("已选 0 篇", { exact: true }).waitFor();
   await page.getByRole("checkbox", { name: "选择文章：Idle 游戏分类学", exact: true }).check();
   await modeToolbar.getByText("已选 1 篇", { exact: true }).waitFor();
   await modeToolbar.getByRole("button", { name: "添加标签", exact: true }).click();
-  await modeToolbar.getByRole("button", { name: "退出多选", exact: true }).click();
+  await page.locator(".result-heading").getByRole("button", { name: "退出多选", exact: true }).click();
   assert.equal(await page.locator(".article-checkbox").count(), 0);
   assert.equal(await modeToolbar.locator("fieldset").count(), 0);
   assert.equal(await modeToolbar.getByText(/已选/).count(), 0);
-  await modeToolbar.getByRole("button", { name: "多选", exact: true }).click();
+  await page.locator(".result-heading").getByRole("button", { name: "多选", exact: true }).click();
   await modeToolbar.getByText("已选 0 篇", { exact: true }).waitFor();
   assert.equal(await page.locator(".article-checkbox input:checked").count(), 0);
-  ok("selection is opt-in, toggle stays right aligned, and exiting clears selection and editor");
+  ok("selection is opt-in, toggle shares the result count row, and exiting clears selection and editor");
+  await checkBulkExport(page, out, ok);
   const original = await snapshot(true);
   assert.ok(Object.values(original.entries).every(e => e.page.schemaVersion === 2));
   const catId = original.entries[seeded[0]].page.categoryId;
@@ -319,17 +334,39 @@ try {
   assert.ok(lib.entries[seeded[1]].page.tagIds.includes(growth));
   ok("renaming to an existing tag offers an explicit merge and deduplicates references");
 
+  const managementSearch = dialog.getByRole("textbox", { name: "搜索分类或标签" });
+  await managementSearch.fill("不存在的管理项");
+  await dialog.getByText("没有匹配的名称", { exact: true }).waitFor();
+  await managementSearch.fill("");
+  await dialog.getByRole("button", { name: "管理“成长系统”", exact: true }).click();
+  assert.equal(await dialog.locator(".taxonomy-row.selected").count(), 1);
+  const surfaces = await dialog.evaluate(el => ({
+    dialog: getComputedStyle(el).backgroundColor,
+    select: getComputedStyle(el.querySelector("select")).backgroundColor,
+    appearance: getComputedStyle(el.querySelector("select")).appearance,
+    save: getComputedStyle(el.querySelector(".primary")).backgroundColor,
+    rail: getComputedStyle(document.querySelector(".library-rail")).backgroundColor,
+    filters: getComputedStyle(document.querySelector(".filter-panel")).backgroundColor,
+  }));
+  assert.deepEqual([surfaces.dialog, surfaces.select, surfaces.rail, surfaces.filters], Array(4).fill("rgb(0, 0, 0)"));
+  assert.equal(surfaces.appearance, "none");
+  assert.equal(surfaces.save, "rgb(35, 168, 131)");
   await page.screenshot({ path: join(out, "taxonomy-management-wide.png"), fullPage: true });
   for (const width of [900, 390, 320]) {
     await page.setViewportSize({ width, height: 850 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.equal(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
+    assert.ok(await dialog.getByRole("button", { name: "关闭管理" }).isVisible());
+    await dialog.getByRole("button", { name: "删除标签", exact: true }).scrollIntoViewIfNeeded();
+    assert.ok(await dialog.getByRole("button", { name: "删除标签", exact: true }).isVisible());
+    await dialog.evaluate(el => el.scrollTop = 0);
     await page.screenshot({ path: join(out, `taxonomy-management-${width}.png`), fullPage: true });
   }
+  ok("management uses shared black surfaces, selected rows and styled controls; search and editing remain usable at 320px");
   await dialog.getByRole("button", { name: "关闭管理" }).click();
   await page.setViewportSize({ width: 1440, height: 960 });
   assert.equal(await page.locator(".article-checkbox").count(), 0);
-  await bulk.getByRole("button", { name: "多选", exact: true }).click();
+  await page.locator(".result-heading").getByRole("button", { name: "多选", exact: true }).click();
   await bulk.getByRole("button", { name: "全选当前筛选结果（4 篇）", exact: true }).click();
   await bulk.getByRole("button", { name: "添加标签", exact: true }).click();
   await page.screenshot({ path: join(out, "taxonomy-bulk-wide.png"), fullPage: true });

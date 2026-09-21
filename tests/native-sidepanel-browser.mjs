@@ -4,9 +4,12 @@ import { readFile, writeFile, mkdir, mkdtemp } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
+import { elementChecks } from "./element-browser-checks.mjs";
+import { hoverTrackingChecks } from "./hover-browser-checks.mjs";
 const out = resolve("test-results");
 await mkdir(out, { recursive: true });
 const fixture = await readFile("tests/fixture.html", "utf8");
+const elementFixture = await readFile("tests/elements-fixture.html", "utf8");
 const server = createServer((req, res) => {
   if (req.url === "/site-icon.svg") {
     res.setHeader("Content-Type", "image/svg+xml");
@@ -14,6 +17,7 @@ const server = createServer((req, res) => {
     return;
   }
   res.setHeader("Content-Type", "text/html; charset=utf-8");
+  if (req.url?.startsWith("/elements")) { res.end(elementFixture); return; }
   res.end(
     fixture.replace("阅读测试 · 本地摘录", "LocalMark Native QA " + req.url).replace("</head>", '<link rel="icon" href="/site-icon.svg"></head>'),
   );
@@ -316,11 +320,11 @@ try {
     await until(async () => (await entry("/first"))?.page.rating === rating, "rating saved");
     await until(() => panel.evaluate(() => !document.querySelector(".rating-stars button").disabled), "rating idle");
     await panel.textClick("最近网页");
-    await until(() => panel.evaluate(n => document.querySelectorAll(".card .rating-dots .filled").length === n, rating), "recent rating");
+    await until(() => panel.evaluate(n => document.querySelectorAll(".webpage-card .rating-dots .filled").length === n, rating), "recent rating");
     ratingColors.add(await panel.evaluate(() => getComputedStyle(document.querySelector(".rating-dots")).color));
-    assert.equal(await panel.evaluate(() => document.querySelectorAll(".card .rating-dots i").length), 5);
+    assert.equal(await panel.evaluate(() => document.querySelectorAll(".webpage-card .rating-dots i").length), 5);
     const geometry = await panel.evaluate(() => {
-      const card = document.querySelector(".card");
+      const card = document.querySelector(".webpage-card");
       const height = card.getBoundingClientRect().height;
       const dots = card.querySelector(".rating-dots");
       dots.style.display = "none";
@@ -491,6 +495,44 @@ try {
   }
   const host = page.locator("#local-web-clipper-root");
   assert.equal(await host.locator(".panel").count(), 0);
+  const editor = host.locator(".editor");
+  const note = host.locator("#wc-note");
+  const quick = host.getByLabel("高亮选中文字", { exact: true });
+  async function dragEditor(dx, dy) {
+    const handle = await editor.locator(".editor-header").boundingBox();
+    const x = handle.x + 60, y = handle.y + handle.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y + dy, { steps: 12 });
+    await page.mouse.up();
+  }
+  const finishMotion = locator => locator.evaluate(async el => {
+    const animation = el.getAnimations()[0];
+    animation.play();
+    await animation.finished;
+  });
+  async function inspectMidpoint(locator) {
+    const frame = await locator.evaluate(el => {
+      const animation = el.getAnimations()[0];
+      animation.pause();
+      animation.currentTime = Number(animation.effect.getTiming().duration) / 2;
+      return { opacity: Number(getComputedStyle(el).opacity), translate: getComputedStyle(el).translate, tooltip: el.classList.contains("tooltip") };
+    });
+    assert.ok(frame.opacity > 0 && frame.opacity < 1, "popup renders an intermediate opacity");
+    if (!frame.tooltip) assert.notEqual(frame.translate, "0px", "editor also moves slightly");
+  }
+  // Pause only after production logic has started closing, so exit presence and
+  // hit testing can be checked deterministically without racing a 180 ms fade.
+  const pauseExit = locator => locator.evaluate(el => {
+    const observer = new MutationObserver(() => {
+      if (el.dataset.state !== "closing") return;
+      const animation = el.getAnimations()[0];
+      animation.pause();
+      animation.currentTime = Number(animation.effect.getTiming().duration) / 2;
+      observer.disconnect();
+    });
+    observer.observe(el, { attributes: true, attributeFilter: ["data-state"] });
+  });
   await page.locator("#first b").scrollIntoViewIfNeeded();
   const selectionBox = await page.locator("#first b").boundingBox();
   await page.mouse.move(
@@ -508,7 +550,37 @@ try {
     await page.evaluate(() => getSelection().toString()),
     "Highlight this passage",
   );
-  await host.getByLabel("高亮选中文字", { exact: true }).click();
+  await finishMotion(host.locator(".quick"));
+  const quickBefore = await quick.boundingBox();
+  const scrollBeforeFocus = await page.evaluate(() => scrollY);
+  await quick.hover();
+  await note.waitFor();
+  assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
+  assert.equal(await page.evaluate(() => scrollY), scrollBeforeFocus);
+  await page.keyboard.insertText("悬停后直接输入的批注");
+  assert.equal(await note.inputValue(), "悬停后直接输入的批注");
+  await inspectMidpoint(editor);
+  await page.screenshot({ path: join(out, "floating-editor-midpoint.png") });
+  await finishMotion(editor);
+  assert.deepEqual(await quick.boundingBox(), quickBefore);
+  const editorBounds = await editor.boundingBox();
+  assert.ok(editorBounds.y >= quickBefore.y + quickBefore.height || editorBounds.y + editorBounds.height <= quickBefore.y);
+  await page.screenshot({ path: join(out, "floating-editor-focused.png") });
+  await dragEditor(-240, -110);
+  const draggedBounds = await editor.boundingBox();
+  assert.ok(Math.abs(draggedBounds.x - (editorBounds.x - 240)) < 1);
+  assert.ok(Math.abs(draggedBounds.y - (editorBounds.y - 110)) < 1);
+  assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true, "dragging preserves the input focus");
+  assert.equal(await page.evaluate(() => scrollY), scrollBeforeFocus);
+  await page.keyboard.insertText("。");
+  await page.keyboard.press("Backspace");
+  assert.equal(await note.inputValue(), "悬停后直接输入的批注");
+  assert.deepEqual(await editor.boundingBox(), draggedBounds, "typing does not snap back to the pencil");
+  assert.deepEqual(await quick.boundingBox(), quickBefore, "dragging leaves quick-save in place");
+  await page.screenshot({ path: join(out, "floating-editor-dragged.png") });
+  ok("dragging the title bar moves the editor outside its starting bounds while preserving focus, text and quick-save position");
+  await pauseExit(editor);
+  await page.mouse.click(quickBefore.x + quickBefore.width / 2, quickBefore.y + quickBefore.height / 2);
   await until(
     async () => (await entry("/spa"))?.page.annotations.length === 1,
     "highlight persisted",
@@ -523,9 +595,68 @@ try {
     "live highlight in panel",
   );
   await host.locator(".quick").waitFor({ state: "hidden" });
+  assert.equal((await entry("/spa")).page.annotations[0].note, "悬停后直接输入的批注");
+  await until(() => editor.getAttribute("data-state").then(s => s === "closing"), "editor exit starts");
+  assert.equal(await editor.evaluate(el => el.inert && getComputedStyle(el).pointerEvents === "none"), true);
+  await finishMotion(editor);
+  await editor.waitFor({ state: "detached" });
+  ok("hovering the stationary pencil focuses the note without scrolling; direct typing, quick save and animated exit work");
+
+  // Both original text and the margin rail expose the same animated preview.
+  await page.locator("#first b").hover();
+  const tooltip = host.locator(".tooltip");
+  await tooltip.waitFor();
+  assert.equal(await tooltip.innerText(), "悬停后直接输入的批注", "text preview contains only its comment");
+  assert.equal(await tooltip.locator(".hover-note").evaluate(el => getComputedStyle(el).borderTopWidth), "0px");
+  await inspectMidpoint(tooltip);
+  await page.screenshot({ path: join(out, "floating-tooltip-midpoint.png") });
+  await finishMotion(tooltip);
+  await page.screenshot({ path: join(out, "text-comment-hover.png") });
+  await tooltip.hover();
+  const retainedTooltip = await tooltip.elementHandle();
+  await pauseExit(tooltip);
+  await page.mouse.move(20, 950);
+  await until(() => tooltip.getAttribute("data-state").then(s => s === "closing"), "tooltip exit starts");
+  assert.equal(await tooltip.evaluate(el => el.inert && getComputedStyle(el).pointerEvents === "none"), true);
+  await inspectMidpoint(tooltip);
+  await page.screenshot({ path: join(out, "floating-tooltip-exit.png") });
+  await host.locator(".rail button").hover();
+  await until(() => tooltip.getAttribute("data-state").then(s => s === "open"), "hover reverses pending exit");
+  assert.equal(await retainedTooltip.evaluate(el => el.isConnected && el === el.getRootNode().querySelector(".tooltip")), true);
+  await finishMotion(tooltip);
+  await tooltip.hover();
+  await page.mouse.move(20, 950);
+  await tooltip.waitFor({ state: "detached" });
+  ok("text and rail previews fade in/out, disable interaction during exit and reuse the popup when an exit is reversed");
+  await hoverTrackingChecks({ page, host, target: page.locator("#first b"), out, name: "text" });
+  ok("text comments follow each pointer frame in white, keep a fixed right-side gap and disappear during continued movement away");
+
+  await panel.click(".card.current .tools button:nth-child(2)");
+  await host.locator('.editor[data-state="open"]').waitFor();
+  await host.locator("#wc-note").fill("   \n  ");
+  await host.getByRole("button", { name: "确认保存", exact: true }).click();
+  await host.locator(".editor").waitFor({ state: "detached" });
+  await until(async () => !(await entry("/spa")).page.annotations[0].note.trim(), "empty note persisted");
+  await page.locator("#first b").hover();
+  await until(async () => await host.locator('.tooltip[data-state="open"]').innerText() === "无评论", "blank note opens placeholder");
+  await hoverTrackingChecks({ page, host, target: page.locator("#first b"), out, name: "text-empty" });
+  await host.locator(".rail button").hover();
+  await until(async () => await host.locator('.tooltip[data-state="open"]').innerText() === "无评论", "rail opens same placeholder");
+  await page.screenshot({ path: join(out, "empty-comment-rail.png") });
+  await page.mouse.move(20, 950);
+  await tooltip.waitFor({ state: "detached" });
+  ok("empty and whitespace-only text comments show 无评论 from the highlight and rail, track the mouse and dismiss normally");
+
   await panel.click(".card.current .tools button:nth-child(2)");
   await host.locator(".editor").waitFor();
+  assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
+  await finishMotion(editor);
+  const editBeforeDrag = await editor.boundingBox();
+  await dragEditor(150, 80);
+  const editAfterDrag = await editor.boundingBox();
+  assert.ok(editAfterDrag.x > editBeforeDrag.x && editAfterDrag.y > editBeforeDrag.y);
   await host.locator("#wc-note").fill("来自侧栏编辑的批注");
+  assert.deepEqual(await editor.boundingBox(), editAfterDrag);
   await host.getByRole("button", { name: "确认保存", exact: true }).click();
   await until(
     () =>
@@ -596,6 +727,75 @@ try {
   ok(
     "missing anchors rebind through the page bridge; stale-URL actions are rejected",
   );
+  async function selectBottom() {
+    await page.locator("#bottom").scrollIntoViewIfNeeded();
+    await page.evaluate(() => {
+      const element = document.querySelector("#bottom"), range = document.createRange();
+      range.selectNodeContents(element);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const bounds = element.getBoundingClientRect();
+      element.dispatchEvent(new MouseEvent("mouseup", {
+        bubbles: true, button: 0, clientX: bounds.right - 4, clientY: bounds.bottom - 4,
+      }));
+    });
+    await quick.waitFor();
+    await finishMotion(host.locator(".quick"));
+  }
+  await editor.waitFor({ state: "detached" });
+  await pageCDP.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 620, deviceScaleFactor: 1, mobile: false });
+  await selectBottom();
+  const narrowScroll = await page.evaluate(() => scrollY);
+  await quick.hover();
+  await note.waitFor();
+  assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
+  assert.equal(await page.evaluate(() => scrollY), narrowScroll);
+  await finishMotion(editor);
+  const narrowBounds = await editor.boundingBox();
+  assert.ok(narrowBounds.x >= 0 && narrowBounds.y >= 0 && narrowBounds.x + narrowBounds.width <= 390 && narrowBounds.y + narrowBounds.height <= 620);
+  assert.equal(await editor.evaluate(el => el.scrollWidth <= el.clientWidth), true);
+  await page.screenshot({ path: join(out, "floating-editor-narrow.png") });
+  await dragEditor(-600, -800);
+  const topLeftBounds = await editor.boundingBox();
+  assert.equal(topLeftBounds.x, 12);
+  assert.equal(topLeftBounds.y, 12);
+  await dragEditor(900, 1000);
+  const bottomRightBounds = await editor.boundingBox();
+  assert.ok(bottomRightBounds.x + bottomRightBounds.width <= 378 && bottomRightBounds.y + bottomRightBounds.height <= 608);
+  await pageCDP.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 480, deviceScaleFactor: 1, mobile: false });
+  await until(async () => {
+    const b = await editor.boundingBox();
+    return b.x >= 12 && b.y >= 12 && b.x + b.width <= 308 && b.y + b.height <= 468;
+  }, "dragged editor stays accessible after viewport shrink");
+  assert.equal(await editor.evaluate(el => el.scrollWidth <= el.clientWidth), true);
+  await page.screenshot({ path: join(out, "floating-editor-dragged-narrow.png") });
+  const resizedBounds = await editor.boundingBox();
+  await editor.getByRole("button", { name: "绿色", exact: true }).click();
+  assert.deepEqual(await editor.boundingBox(), resizedBounds, "color controls do not drag or reset the editor");
+  await note.focus();
+  await page.keyboard.insertText("直接输入第一行");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.insertText("第二行");
+  assert.equal(await note.inputValue(), "直接输入第一行\n第二行");
+  await page.keyboard.press("Escape");
+  await editor.waitFor({ state: "detached" });
+  assert.equal((await entry("/spa")).page.annotations.length, 1, "Escape only discards the draft");
+  await pageCDP.send("Emulation.clearDeviceMetricsOverride");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await selectBottom();
+  await quick.hover();
+  await note.waitFor();
+  assert.equal(await editor.evaluate(el => Number(getComputedStyle(el).opacity) === 1 && el.getAnimations().every(a => a.playState !== "running")), true);
+  assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  assert.equal(await editor.evaluate(el => Number(getComputedStyle(el).opacity) === 1 && el.getAnimations().every(a => a.playState !== "running")), true, "changing motion preference does not replay entry");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await host.getByLabel("关闭编辑窗", { exact: true }).click();
+  await editor.waitFor({ state: "detached" });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  ok("near the page bottom, the focused editor fits a 390px viewport, supports multiline typing/Escape, and respects reduced motion");
+  ok("new and existing editors drag, clamp to viewport edges and resize, while color and close buttons keep their normal actions");
   // Select in the same task as pushState, before React or the 500 ms URL poll.
   await page.evaluate(() => {
     history.pushState({}, "", "/instant");
@@ -632,6 +832,15 @@ try {
   ok(
     "selection immediately after pushState survives URL synchronization and saves only to the new page",
   );
+  await host.locator(".quick").waitFor({ state: "detached" });
+  await selectBottom();
+  await quick.hover();
+  await note.waitFor();
+  await page.keyboard.insertText("自动聚焦后回车保存");
+  await page.keyboard.press("Enter");
+  await until(async () => (await entry("/instant"))?.page.annotations.some(mark => mark.note === "自动聚焦后回车保存"), "Enter saves immediately typed note");
+  await editor.waitFor({ state: "detached" });
+  ok("Enter saves a note typed after hover without ever clicking the comment input");
   // Restricted pages must not retain the previous article as an editable current page.
   await second.goto("chrome://version");
   await second.bringToFront();
@@ -648,10 +857,10 @@ try {
   );
   await panel.textClick("最近网页");
   await until(
-    () => panel.evaluate(() => document.querySelectorAll(".card").length >= 2),
+    () => panel.evaluate(() => document.querySelectorAll(".webpage-card").length >= 2),
     "library remains available",
   );
-  await until(() => panel.evaluate(() => [...document.querySelectorAll(".card .site-icon img")].length >= 2 && [...document.querySelectorAll(".card .site-icon img")].every(img => img.complete && img.naturalWidth > 0)), "recent icons loaded");
+  await until(() => panel.evaluate(() => [...document.querySelectorAll(".webpage-card .site-icon img")].length >= 2 && [...document.querySelectorAll(".webpage-card .site-icon img")].every(img => img.complete && img.naturalWidth > 0)), "recent icons loaded");
   await panel.screenshot("native-recent-icons.png");
   await panel.textClick("标签");
   await until(() => panel.evaluate(() => !!document.querySelector(".result-card .site-icon img")?.naturalWidth && !!document.querySelector(".result-card .site-backdrop img")?.naturalWidth), "tag icons loaded");
@@ -831,6 +1040,37 @@ try {
   await dashboard.close();
   await page.bringToFront();
   ok("native footer management entry opens and reuses the dashboard window");
+  const idleImportLayout = await panel.evaluate(() => ({
+    entry: !!document.querySelector(".metadata-import-entry"),
+    overlay: !!document.querySelector(".metadata-drop-overlay"),
+    tabsTop: document.querySelector(".tabs").getBoundingClientRect().top,
+  }));
+  assert.deepEqual(idleImportLayout, { entry: false, overlay: false, tabsTop: 0 });
+  await panel.screenshot("import-native-idle.png");
+  const dragHint = (type, selector = ".panel", files = true) => panel.evaluate(({ type, selector, files }) => {
+    const transfer = new DataTransfer();
+    if (files) transfer.items.add(new File(["{}"], "示例.json", { type: "application/json" }));
+    else transfer.setData("text/plain", "普通文字");
+    const event = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer });
+    document.querySelector(selector).dispatchEvent(event);
+    return event.defaultPrevented;
+  }, { type, selector, files });
+  assert.equal(await dragHint("dragenter", ".panel", false), false);
+  assert.equal(await panel.evaluate(() => !!document.querySelector(".metadata-drop-overlay")), false);
+  assert.equal(await dragHint("dragenter"), true);
+  await until(() => panel.evaluate(() => document.querySelector(".metadata-drop-overlay")?.textContent.includes("支持拖入一个或多个 JSON")), "drag-only JSON hint");
+  assert.equal(await panel.evaluate(() => document.querySelector(".tabs").getBoundingClientRect().top), 0);
+  assert.equal(await panel.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await panel.screenshot("import-native-drag-hint.png");
+  await dragHint("dragenter", ".tabs");
+  await dragHint("dragleave", ".tabs");
+  assert.equal(await panel.evaluate(() => !!document.querySelector(".metadata-drop-overlay")), true, "moving between children keeps the hint visible");
+  await dragHint("dragleave");
+  await until(() => panel.evaluate(() => !document.querySelector(".metadata-drop-overlay")), "leaving hides the hint");
+  await dragHint("dragenter");
+  await panel.evaluate(() => window.dispatchEvent(new Event("dragend")));
+  await until(() => panel.evaluate(() => !document.querySelector(".metadata-drop-overlay")), "cancelling hides the hint");
+  ok("sidebar import takes no idle space; only file drags show the overlay, without layout movement, and leave/cancel clears it");
   await panel.evaluate(base => {
     const transfer = new DataTransfer();
     for (const [id, title] of [["5555555555555555", "侧栏拖入一"], ["6666666666666666", "侧栏拖入二"]]) {
@@ -844,6 +1084,7 @@ try {
     target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
   }, base);
   await until(() => panel.evaluate(() => document.querySelector(".metadata-import-summary")?.textContent === "已导入 2 · 待同步 0 · 已跳过 0 · 失败 0"), "native sidebar import");
+  assert.equal(await panel.evaluate(() => !!document.querySelector(".metadata-drop-overlay")), false);
   await panel.screenshot("import-native-result.png");
   await panel.click(".metadata-import-report header button");
   await until(() => panel.evaluate(() => document.querySelector(".tabs button.active")?.textContent.includes("最近网页")), "imported recent list");
@@ -858,6 +1099,54 @@ try {
   });
   assert.deepEqual(storedImport, imported.page);
   ok("native sidebar accepts multiple dropped JSON files, writes dated metadata, and shows the imported records");
+  const { expose: exposeElements } = await elementChecks({ page, panel, context, base, out, until, ok, state });
+  const edgeToggle = page.locator("#local-web-clipper-root .element-pick-toggle");
+  const sideToggle = page.locator("#local-web-clipper-root .sidepanel-toggle");
+  await until(async () => await sideToggle.getAttribute("aria-expanded") === "true", "page button knows native sidebar is open");
+  await panel.detach();
+  await sideToggle.click();
+  await until(async () => await sideToggle.getAttribute("aria-expanded") === "false", "page button closes the real native sidebar");
+  await sideToggle.click();
+  panel = await attachPanel();
+  await until(async () => await sideToggle.getAttribute("aria-expanded") === "true", "page button reopens the real native sidebar");
+  await page.screenshot({ path: join(out, "page-tools-sidebar-open.png") });
+  ok("real page button closes and opens the native sidebar from a click, with the active state following its actual lifecycle");
+  await edgeToggle.click();
+  await page.locator("#local-web-clipper-root .element-picker").waitFor();
+  await panel.detach();
+  await toggle(page);
+  await edgeToggle.waitFor();
+  await page.locator("#local-web-clipper-root .element-picker").waitFor();
+  await edgeToggle.click();
+  await page.locator("#local-web-clipper-root .element-picker").waitFor({ state: "hidden" });
+  await page.reload();
+  await exposeElements();
+  await edgeToggle.waitFor();
+  await edgeToggle.click();
+  await page.locator("#card-heading").click();
+  const standaloneEditor = page.locator('#local-web-clipper-root .editor[data-state="open"]');
+  await standaloneEditor.waitFor();
+  await standaloneEditor.getByRole("button", { name: "取消", exact: true }).click();
+  await standaloneEditor.waitFor({ state: "hidden" });
+  await page.locator("#local-web-clipper-root .editor").waitFor({ state: "hidden" });
+  await page.screenshot({ path: join(out, "element-edge-sidebar-closed.png") });
+  await toggle(page);
+  panel = await attachPanel();
+  await edgeToggle.waitFor();
+  assert.equal(await edgeToggle.getAttribute("aria-pressed"), "false");
+  const alternate = await context.newPage();
+  await alternate.goto(base + "/element-alternate");
+  await alternate.bringToFront();
+  await until(() => panel.evaluate(() => document.querySelector(".page-title-row h3")?.textContent.includes("element-alternate")), "sidebar follows the other tab");
+  assert.equal(await edgeToggle.count(), 1, "tools remain mounted independently of the sidebar's active tab");
+  await page.bringToFront();
+  await edgeToggle.waitFor();
+  await alternate.close();
+  await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+  const edgeAfterScroll = await edgeToggle.boundingBox();
+  assert.ok(Math.abs(edgeAfterScroll.y + edgeAfterScroll.height / 2 - await page.evaluate(() => innerHeight / 2)) <= 1);
+  await page.evaluate(() => scrollTo(0, 0));
+  ok("page tools and element editing work with the native sidebar closed; reopening and tab switching keep tools available and centered after scroll");
   if (process.env.LOCALMARK_INTERACTIVE_QA === "1") {
     await panel.detach();
     await toggle(page);

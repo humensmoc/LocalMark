@@ -19,7 +19,6 @@
 .rating-dots > i.filled { background: currentColor; }
 .rated-url { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .rated-url > .url { flex: 1; min-width: 0; }
-.result-card.page-surface > .rating-dots { position: absolute; bottom: 3px; right: 13px; height: 6px; }
 .page-rating { margin: 16px 0; }
 .rating-editor-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rating-label { font-size: 12px; }

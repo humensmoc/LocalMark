@@ -41,13 +41,13 @@ export async function prepareMetadataImport(library: Library, files: ImportFile[
         next.taxonomy!.categories.find(item => item.id === page.categoryId)?.name));
       const tags = PageTagsSchema.parse(raw.tags ?? (page.schemaVersion === 1 ? page.tags :
         page.tagIds!.map(id => next.taxonomy!.tags.find(item => item.id === id)?.name)));
-      if (page.schemaVersion === 2 && page.tagIds!.length !== tags.length)
+      if (page.schemaVersion !== 1 && page.tagIds!.length !== tags.length)
         throw Error("标签名称与标签 ID 数量不一致，请使用包含完整标签名称的元数据。");
       // Validate a per-file candidate before publishing its catalog additions.
       const candidate = { ...next, taxonomy: structuredClone(next.taxonomy) };
       page.categoryId = ensureTaxon(candidate, "categories", category).id;
       page.tagIds = [...new Set(tags.map(name => ensureTaxon(candidate, "tags", name).id))];
-      page.schemaVersion = 2;
+      page.schemaVersion = page.schemaVersion === 3 ? 3 : 2;
       projectPage(candidate, page);
       TaxonomySchema.parse(candidate.taxonomy);
       // The current folder chooses its own free Markdown name if export is enabled.

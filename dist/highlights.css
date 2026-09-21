@@ -23,3 +23,8 @@
   color: #18211c;
   text-decoration: underline;
 }
+::highlight(wc-context-yellow) { text-decoration: underline dashed #ad7800; }
+::highlight(wc-context-green) { text-decoration: underline dashed #278254; }
+::highlight(wc-context-blue) { text-decoration: underline dashed #237cad; }
+::highlight(wc-context-pink) { text-decoration: underline dashed #b94786; }
+::highlight(wc-context-purple) { text-decoration: underline dashed #8259b8; }

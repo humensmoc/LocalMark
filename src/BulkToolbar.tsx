@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Library, Page } from "./model";
 import type { Request } from "./protocol";
 import { relationToken, taxonomyToken, type BulkAction } from "./taxonomy";
+import { MetadataExport } from "./MetadataExport";
 
-export function BulkToolbar({ lib, selected, visible, select, mutate, active, toggleMode }: {
+export function BulkToolbar({ lib, selected, visible, select, mutate, active, toggleMode, summary }: {
   lib: Library; selected: string[]; visible: Page[];
+  summary: ReactNode;
   active: boolean; toggleMode: () => void;
   select: (ids: string[]) => void; mutate: (m: Request) => Promise<unknown>;
 }) {
@@ -22,23 +24,28 @@ export function BulkToolbar({ lib, selected, visible, select, mutate, active, to
   }
   const actual = selectedPages.filter(p => editor?.operation === "category" ? p.categoryId !== ids[0]
     : editor?.operation === "add-tags" ? ids.some(id => !p.tagIds?.includes(id)) : ids.some(id => p.tagIds?.includes(id))).length;
-  return <div className="bulk-toolbar" aria-label="批量整理">
-    <div className="row wrap bulk-toolbar-heading">
-      {active && <div className="row wrap bulk-selection-summary">
-      <b>已选 {selected.length} 篇</b>
-      <button disabled={busy || !visible.length} onClick={() => { select(visible.map(p => p.id)); setEditor(undefined); }}>全选当前筛选结果（{visible.length} 篇）</button>
-      {!!selected.length && <button disabled={busy} onClick={() => { select([]); setEditor(undefined); }}>取消选择</button>}
-      </div>}
+  return <>
+    <div className="result-heading selectable-results-heading">
+      {summary}
       <button className="bulk-mode-toggle" aria-pressed={active} disabled={busy} onClick={() => {
         setEditor(undefined); setIds([]); setError(""); setNotice(""); toggleMode();
       }}>{active ? "退出多选" : "多选"}</button>
+      <small>最近修改优先</small>
     </div>
-    {active && !!selected.length && <div className="row wrap">
+    {active && <div className="bulk-toolbar" aria-label="批量整理">
+    <div className="row wrap bulk-selection-summary">
+      <b>已选 {selected.length} 篇</b>
+      <button disabled={busy || !visible.length} onClick={() => { select(visible.map(p => p.id)); setEditor(undefined); }}>全选当前筛选结果（{visible.length} 篇）</button>
+      {!!selected.length && <button disabled={busy} onClick={() => { select([]); setEditor(undefined); }}>取消选择</button>}
+    </div>
+    {!!selected.length && <div className="row wrap">
       <button disabled={busy} onClick={() => open("category")}>更改主分类</button>
       <button disabled={busy} onClick={() => open("add-tags")}>添加标签</button>
       <button disabled={busy} onClick={() => open("remove-tags")}>移除标签</button>
+      <MetadataExport pages={selectedPages} disabled={busy} onBusy={value => { setBusy(value); if (value) setEditor(undefined); }}
+        onResult={(message, failed) => { setError(failed ? message : ""); setNotice(failed ? "" : message); }} />
     </div>}
-    {active && editor && <fieldset disabled={busy}>
+    {editor && <fieldset disabled={busy}>
       <legend>{editor.operation === "category" ? "选择一个主分类" : "选择标签（可多选）"}</legend>
       <div className="bulk-options">{catalog?.map(x => <label key={x.id}>
         <input type={editor.operation === "category" ? "radio" : "checkbox"} name="bulk-taxonomy" checked={ids.includes(x.id)} onChange={() => setIds(editor.operation === "category" ? [x.id] : ids.includes(x.id) ? ids.filter(id => id !== x.id) : [...ids, x.id])} />
@@ -57,5 +64,6 @@ export function BulkToolbar({ lib, selected, visible, select, mutate, active, to
     </fieldset>}
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status">{notice}</p>}
-  </div>;
+  </div>}
+  </>;
 }

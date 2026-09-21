@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { ElementAnchorSchema } from "./element-model";
+export type { ElementAnchor } from "./element-model";
 export const COLORS = {
   yellow: { name: "黄色", hex: "#ffe68b" },
   green: { name: "绿色", hex: "#8adbad" },
@@ -16,7 +18,7 @@ const timestamp = z.string().datetime();
 export const PageTagsSchema = z
   .array(z.string().trim().min(1).max(100))
   .max(500);
-export const AnchorSchema = z
+const QuoteSchema = z
   .object({
     exact: z.string().min(1).max(100000),
     prefix: z.string().max(128),
@@ -27,6 +29,15 @@ export const AnchorSchema = z
     occurrences: z.number().int().positive().optional(),
   })
   .refine((a) => a.end > a.start, "定位范围无效");
+export const TextAnchorSchema = QuoteSchema.and(z.object({
+  kind: z.literal("text").optional(),
+  basis: z.literal("source").optional(),
+  segments: z.array(z.object({
+    source: QuoteSchema,
+    translation: QuoteSchema.optional(),
+  })).min(1).max(500).optional(),
+})).refine(a => !a.segments || a.basis === "source", "译文定位需要原文索引");
+export const AnchorSchema = z.union([ElementAnchorSchema, TextAnchorSchema]);
 export const MarkSchema = z
   .object({
     id: z.string().uuid(),
@@ -41,7 +52,7 @@ export const MarkSchema = z
   ; // Display text can change without changing the original source anchor.
 export const PageSchema = z
   .object({
-    schemaVersion: z.union([z.literal(1), z.literal(2)]),
+    schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     id: z.string().regex(/^[a-f0-9]{16}$/),
     url: z
       .string()
@@ -85,7 +96,8 @@ export const PageSchema = z
       )
       .optional(),
   })
-  .refine(p => p.schemaVersion === 1 || (!!p.categoryId && Array.isArray(p.tagIds) && new Set(p.tagIds).size === p.tagIds.length), "v2 网页必须包含有效的分类 ID 和不重复的标签 ID")
+  .refine(p => p.schemaVersion === 1 || (!!p.categoryId && Array.isArray(p.tagIds) && new Set(p.tagIds).size === p.tagIds.length), "网页必须包含有效的分类 ID 和不重复的标签 ID")
+  .refine(p => p.schemaVersion === 3 || p.annotations.every(m => m.anchor.kind !== "element"), "元素标注需要 v3 元数据，请升级插件")
   .refine(
     (p) =>
       new Set(p.annotations.map((a) => a.id)).size === p.annotations.length,
@@ -95,7 +107,8 @@ export const PageSchema = z
     ...p,
     tags: p.tags ?? [...new Set(p.annotations.flatMap((m) => m.tags))],
   }));
-export type Anchor = z.infer<typeof AnchorSchema>;
+export type Anchor = z.infer<typeof TextAnchorSchema>;
+export type MarkAnchor = z.infer<typeof AnchorSchema>;
 export type Mark = z.infer<typeof MarkSchema>;
 export type Page = z.infer<typeof PageSchema>;
 export type Issue = {
@@ -114,6 +127,8 @@ export type Entry = {
   legacyMdBase?: string | null;
 };
 export type Library = {
+  showPageTools?: boolean;
+  pageTools?: Partial<Record<PageTool, boolean>>;
   autoGenerateMarkdown?: boolean;
   taxonomy?: Taxonomy;
   taxonomyBase?: string | null;
@@ -125,9 +140,18 @@ export type Library = {
   errors: string[];
   directoryName?: string;
 };
+export const PAGE_TOOLS = [
+  { id: "visibility", label: "显示高亮显隐按钮", description: "用眼睛按钮显示或隐藏当前网页的高亮和元素标注。" },
+  { id: "element", label: "显示元素选择按钮", description: "选择网页图片或内容模块，添加元素批注。" },
+  { id: "sidebar", label: "显示侧边栏按钮", description: "点击展开侧边栏，再次点击关闭。" },
+] as const;
+export type PageTool = typeof PAGE_TOOLS[number]["id"];
+export const pageToolEnabled = (lib: Library, tool: PageTool) =>
+  lib.pageTools?.[tool] ?? lib.showPageTools !== false;
 export type Taxon = { id: string; name: string; description?: string };
 export type Taxonomy = { version: 1; revision: string; categories: Taxon[]; tags: Taxon[]; colorDescriptions?: Partial<Record<Color, string>> };
 export const emptyLibrary = (): Library => ({
+  showPageTools: true,
   autoGenerateMarkdown: false,
   entries: {},
   lastColor: "yellow",
@@ -178,7 +202,9 @@ const encode = (s: string) =>
     /[-!'()*]/g,
     (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
   );
-export function textLink(page: Pick<Page, "url">, a: Anchor) {
+export function textLink(page: Pick<Page, "url">, a: MarkAnchor) {
+  // Browsers have no native fragment selector for arbitrary DOM elements.
+  if (a.kind === "element") return page.url;
   const u = new URL(page.url);
   const prefix = a.prefix.trim(),
     suffix = a.suffix.trim();
@@ -269,7 +295,8 @@ function frontmatterMarkdown(p: Page, legacyTextLinks: boolean) {
     ? "## 网页评论\n\n" + p.comment.split("\n").map(md).join("  \n") + "\n\n"
     : "";
   const excerpts = p.annotations.map((m) => {
-    const quote = m.text.split("\n").map((line) => "> " + md(line)).join("\n");
+    const label = m.anchor.kind === "element" ? `元素标注（${md(m.anchor.tag)}）\n\n` : "";
+    const quote = label + m.text.split("\n").map((line) => "> " + md(line)).join("\n");
     const note = m.note.trim() ? m.note.split("\n").map(md).join("  \n") : "";
     // Keep the old format only for recognizing untouched exports during sync.
     if (legacyTextLinks)
@@ -280,6 +307,13 @@ function frontmatterMarkdown(p: Page, legacyTextLinks: boolean) {
 }
 export function markdown(p: Page) {
   return frontmatterMarkdown(p, false);
+}
+export function compareMarks(a: Mark, b: Mark) {
+  if (a.anchor.kind !== "element" && b.anchor.kind !== "element")
+    return a.anchor.start - b.anchor.start || a.id.localeCompare(b.id);
+  if ((a.anchor.kind === "element") !== (b.anchor.kind === "element"))
+    return a.anchor.kind === "element" ? 1 : -1;
+  return a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
 }
 export function isGeneratedMarkdown(value: string, p: Page) {
   // A marker alone is not proof that a document has no manual edits.

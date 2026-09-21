@@ -400,15 +400,15 @@ try {
   await page.screenshot({ path: join(out, "hover-note.png") });
   ok("hover on original text displays annotation");
   await host.locator(".rail button").nth(1).hover();
-  await host.locator(".tooltip .hover-quote").waitFor();
-  assert.match(await host.locator(".tooltip").innerText(), /同一篇文章/);
+  await host.locator(".tooltip .hover-note").waitFor();
+  assert.doesNotMatch(await host.locator(".tooltip").innerText(), /同一篇文章/);
   assert.match(await host.locator(".tooltip").innerText(), /这是中文批注/);
   await page.screenshot({ path: join(out, "rail-preview.png") });
   await host.locator(".tooltip").hover();
   assert.equal(await host.locator(".tooltip").count(), 1);
   await page.mouse.move(1200, 900);
   ok(
-    "rail hover displays excerpt and note and permits moving into the preview",
+    "rail hover displays only the note and permits moving into the preview",
   );
   await page.getByLabel("网页输入框").selectText();
   await page.getByLabel("网页输入框").dispatchEvent("mouseup", { button: 0 });

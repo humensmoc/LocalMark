@@ -11,12 +11,15 @@ import {
   PageRatingSchema,
   PageCategorySchema,
   DEFAULT_CATEGORY,
+  PAGE_TOOLS,
+  pageToolEnabled,
   type Library,
   type Page,
 } from "./model";
 import { DirectoryFiles } from "./files";
 import { SyncEngine } from "./sync";
 import { mergeSyncResult } from "./sync-state";
+import { openSidePanelFromPage } from "./page-bridge";
 import type { Request } from "./protocol";
 import { prepareMetadataImport, validateImportBatch, type ImportRequest } from "./metadata-import";
 import { metadataFilePath } from "./metadata-names";
@@ -148,6 +151,23 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
   }
   const lib = await library();
   if (m.type === "snapshot") return lib;
+  if (m.type === "show-page-tools") {
+    if (sender.url !== chrome.runtime.getURL("settings.html"))
+      throw Error("请在设置中修改网页悬浮按钮开关。");
+    if (typeof m.enabled !== "boolean") throw Error("开关值无效。");
+    if (m.tool !== undefined && !PAGE_TOOLS.some(tool => tool.id === m.tool))
+      throw Error("网页按钮类型无效。");
+    if (m.tool) {
+      lib.pageTools = Object.fromEntries(PAGE_TOOLS.map(tool => [tool.id,
+        tool.id === m.tool ? m.enabled : pageToolEnabled(lib, tool.id)]));
+    } else {
+      lib.showPageTools = m.enabled;
+      lib.pageTools = Object.fromEntries(PAGE_TOOLS.map(tool => [tool.id, m.enabled]));
+    }
+    await db.set("library", lib);
+    void notify().catch(() => {});
+    return lib;
+  }
   if (m.type === "auto-generate-markdown") {
     if (sender.url !== chrome.runtime.getURL("settings.html"))
       throw Error("请在设置中修改 Markdown 自动生成开关。");
@@ -308,6 +328,7 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
       });
       if (old) e.page.annotations[e.page.annotations.indexOf(old)] = mark;
       else e.page.annotations.push(mark);
+      if (mark.anchor.kind === "element") e.page.schemaVersion = 3;
       e.page.updatedAt = time;
       e.dirty = true;
       e.mdDirty = true;
@@ -407,6 +428,14 @@ async function dispatch(m: Request | ImportRequest, sender: chrome.runtime.Messa
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (["changed", "page-updated"].includes(message?.type)) return false;
+  if (message?.type === "open-sidepanel") {
+    // Preserve the originating click's user activation: do not queue or await I/O.
+    try {
+      openSidePanelFromPage(sender).then(() => reply({ ok: true }),
+        error => reply({ ok: false, error: String(error) }));
+    } catch (error) { reply({ ok: false, error: String(error) }); }
+    return true;
+  }
   // Opening settings must not wait behind a slow or stalled filesystem operation.
   const task =
     message?.type === "settings"

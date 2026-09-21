@@ -26,20 +26,21 @@ export function SiteIcon({ site, backdrop = false }: { site: Site; backdrop?: bo
 
 function Artwork({ site, backdrop }: { site: Site; backdrop: boolean }) {
   const [attempt, setAttempt] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   const candidates = sources(site);
   let host = "";
   try { host = new URL(site.url).hostname.replace(/^www\./, ""); } catch { /* Use neutral fallback. */ }
   const hue = [...host].reduce((hash, letter) => (hash * 31 + letter.charCodeAt(0)) % 360, 0);
   return (
     <span className={backdrop ? "site-backdrop" : "site-icon"} aria-hidden="true">
-      {candidates[attempt] ? (
-        <img key={candidates[attempt]} src={candidates[attempt]} alt=""
+      {!loaded && <span className="site-monogram" style={{ background: `hsl(${hue} 42% 36%)` }}>
+        {host.charAt(0).toLocaleUpperCase() || "W"}
+      </span>}
+      {candidates[attempt] && (
+        <img key={candidates[attempt]} src={candidates[attempt]} alt="" className={loaded ? undefined : "is-loading"}
           referrerPolicy="no-referrer" decoding="async" loading="lazy"
-          onError={() => setAttempt((value) => value + 1)} />
-      ) : (
-        <span className="site-monogram" style={{ background: `hsl(${hue} 42% 36%)` }}>
-          {host.charAt(0).toLocaleUpperCase() || "W"}
-        </span>
+          onLoad={() => setLoaded(true)}
+          onError={() => { setLoaded(false); setAttempt((value) => value + 1); }} />
       )}
     </span>
   );

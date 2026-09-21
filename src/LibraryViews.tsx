@@ -5,13 +5,16 @@ import { SiteIcon } from "./SiteIcon";
 import { RatingDots } from "./PageRating";
 import { taxonomyToken, UNCATEGORIZED } from "./taxonomy";
 import type { Request } from "./protocol";
+import { CatalogTreemap } from "./CatalogTreemap";
+import { CardFlow } from "./CardFlow";
+import { GroupedContent } from "./GroupedContent";
+import { PageCard } from "./PageCard";
 
 export const LIBRARY_VIEWS = [
   { id: "pages", label: "网页", icon: "page", hint: "按主分类与子标签筛选收藏，在右侧阅读和编辑。" },
   { id: "categories", label: "主分类", icon: "folder", hint: "梳理收藏的大方向，记录每个分类的含义与收录边界。" },
   { id: "tags", label: "子标签", icon: "tag", hint: "用可跨主分类复用的标签，连接相似的主题与想法。" },
-  { id: "highlights", label: "高亮内容", icon: "pen", hint: "所有网页的高亮摘录，以及与摘录对应的批注。" },
-  { id: "comments", label: "独立批注", icon: "comment", hint: "集中阅读写在高亮里的评论，并查看对应摘录。" },
+  { id: "highlights", label: "高亮内容", icon: "pen", hint: "按网页分组阅读高亮摘录与对应批注。" },
   { id: "colors", label: "颜色", icon: "palette", hint: "为高亮颜色赋予含义，形成自己的阅读与思考习惯。" },
 ] as const;
 export type LibraryView = typeof LIBRARY_VIEWS[number]["id"];
@@ -35,7 +38,7 @@ export function catalogItems(lib: Library, kind: CatalogKind): CatalogItem[] {
 export function LibraryNavigation({ view, lib, change }: { view: LibraryView; lib: Library; change: (view: LibraryView) => void }) {
   const pages = Object.values(lib.entries).map(e => e.page);
   const counts = { pages: pages.length, categories: lib.taxonomy?.categories.length ?? 0, tags: lib.taxonomy?.tags.length ?? 0,
-    highlights: pages.reduce((n, p) => n + p.annotations.length, 0), comments: pages.reduce((n, p) => n + p.annotations.filter(m => m.note.trim()).length, 0), colors: Object.keys(COLORS).length };
+    highlights: pages.reduce((n, p) => n + p.annotations.length, 0), colors: Object.keys(COLORS).length };
   return <nav className="library-navigation" aria-label="资料库视图">
     <small className="rail-label">资料库</small>
     {LIBRARY_VIEWS.map(item => <button key={item.id} aria-current={view === item.id ? "page" : undefined}
@@ -48,54 +51,84 @@ export function LibraryNavigation({ view, lib, change }: { view: LibraryView; li
 export function CatalogGrid({ lib, kind, query, selected, choose, manage }: {
   lib: Library; kind: CatalogKind; query: string; selected: string; choose: (id: string) => void; manage: () => void;
 }) {
-  const items = catalogItems(lib, kind).filter(x => `${x.name}\n${x.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const [views, setViews] = useState<Record<string, string>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("localmark.catalog.views") ?? "{}");
+      return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+    } catch { return {}; }
+  });
+  const mode = kind !== "colors" && views[kind] === "treemap" ? "treemap" : "cards";
+  function changeView(value: string) {
+    const next = { ...views, [kind]: value };
+    setViews(next);
+    try { localStorage.setItem("localmark.catalog.views", JSON.stringify(next)); } catch { /* Keep this window usable without storage. */ }
+  }
+  const allItems = catalogItems(lib, kind);
+  const items = allItems.filter(x => `${x.name}\n${x.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return <div className="library-collection">
-    <div className="collection-heading"><span>{items.length} 项</span>{kind !== "colors" && <button onClick={manage}>新建{kind === "categories" ? "主分类" : "子标签"}</button>}</div>
-    <div className={`catalog-grid${kind === "colors" ? "" : " taxonomy-grid"}`}>
+    <div className="collection-heading"><span>{items.length} 项</span>{kind !== "colors" && <div className="catalog-controls">
+      <div className="catalog-view-toggle" role="group" aria-label="展示方式"><button aria-pressed={mode === "cards"} onClick={() => changeView("cards")}>卡片</button><button aria-pressed={mode === "treemap"} onClick={() => changeView("treemap")}>占比图</button></div>
+      <button onClick={manage}>新建{kind === "categories" ? "主分类" : "子标签"}</button></div>}</div>
+    {mode === "treemap" && kind !== "colors" && !!items.length ? <CatalogTreemap items={items} allItems={allItems} kind={kind} filtered={!!query.trim()} selected={selected} choose={choose} /> : <div className={`catalog-grid${kind === "colors" ? "" : " taxonomy-grid"}`}>
       {items.map(item => <button key={item.id} className={`catalog-card ${selected === item.id ? "selected" : ""}`} aria-pressed={selected === item.id} onClick={() => choose(item.id)}>
         <span className="catalog-card-title">{item.color ? <i className="catalog-color" style={{ background: COLORS[item.color].hex }} /> : <Icon name={kind === "categories" ? "folder" : "tag"} />}<strong>{item.name}</strong></span>
         <span className={`catalog-description ${item.description ? "" : "muted"}`}>{item.description || "暂无说明"}</span>
         <small>{item.count} {kind === "colors" ? "条高亮" : "个网页"}</small>
       </button>)}
       {!items.length && <div className="collection-empty"><Icon name="tag" size={30} /><h3>{query ? "没有匹配的内容" : "还没有子标签"}</h3><p>{query ? "试试搜索其他名称或说明。" : "创建标签，为不同网页建立共同的主题。"}</p></div>}
-    </div>
+    </div>}
   </div>;
 }
 
-function Source({ page, open }: { page: Page; open: (p: Page) => void }) {
-  return <button className="content-source" onClick={() => open(page)} title={`查看网页：${page.title}`}>
-    <SiteIcon site={page} /><span>{page.title}<small className="rated-source-meta"><span className="source-host">{new URL(page.url).hostname}</span><RatingDots rating={page.rating} /></small></span><Icon name="arrow" size={14} />
+function Source({ page, open, date }: { page: Page; open: (p: Page) => void; date?: string }) {
+  return <button className={`content-source${date ? " dated-source" : ""}`} onClick={() => open(page)} title={`查看网页：${page.title}`}>
+    <SiteIcon site={page} /><span>{page.title}<small className="rated-source-meta"><span className="source-host">{new URL(page.url).hostname}</span>{date && <time dateTime={date}>{new Date(date).toLocaleDateString("zh-CN")}</time>}<RatingDots rating={page.rating} /></small></span>{!date && <Icon name="arrow" size={14} />}
   </button>;
 }
-export function HighlightCard({ page, mark, open }: { page: Page; mark: Mark; open: (p: Page) => void }) {
-  return <article className="content-card" style={{ "--mark": COLORS[mark.color].hex } as CSSProperties}>
-    <div className="content-card-meta"><span><i style={{ background: COLORS[mark.color].hex }} />{COLORS[mark.color].name}高亮</span><time>{new Date(mark.updatedAt).toLocaleDateString("zh-CN")}</time></div>
-    <blockquote>{mark.text}</blockquote>
-    {mark.note.trim() && <div className="content-note"><small>批注</small><p>{mark.note}</p></div>}
-    <Source page={page} open={open} />
+function ContentTags({ page }: { page: Page }) {
+  return <div className="content-page-tags result-taxonomy" aria-label="所属网页标签">
+    <span className="result-category">{page.category}</span>
+    {page.tags.map(tag => <span className="result-tag" key={tag}>{tag}</span>)}
+  </div>;
+}
+export function HighlightCard({ page, mark, open, showSource = true }: { page: Page; mark: Mark; open: (p: Page) => void; showSource?: boolean }) {
+  return <article className="content-card" data-mark-id={mark.id} style={{ "--mark": COLORS[mark.color].hex } as CSSProperties}>
+    <div className="content-card-body" tabIndex={0} role="region" aria-label="高亮和批注内容">
+      {mark.anchor.kind === "element" && <small className="element-kind">元素 · {mark.anchor.tag}</small>}
+      <blockquote>{mark.text}</blockquote>
+      {mark.note.trim() && <div className="content-note"><p>{mark.note}</p></div>}
+    </div>
+    {showSource && <><ContentTags page={page} /><Source page={page} open={open} date={mark.updatedAt} /></>}
   </article>;
 }
 
-export function ContentCollection({ pages, view, query, open }: { pages: Page[]; view: "highlights" | "comments"; query: string; open: (p: Page) => void }) {
-  const needle = query.trim().toLocaleLowerCase();
-  const includes = (...parts: string[]) => parts.join("\n").toLocaleLowerCase().includes(needle);
-  const highlights = pages.flatMap(page => page.annotations.map(mark => ({ page, mark })))
-    .filter(({ page, mark }) => includes(page.title, page.url, mark.text, mark.note, page.category, ...page.tags))
-    .sort((a, b) => b.mark.updatedAt.localeCompare(a.mark.updatedAt));
-  const comments = highlights.filter(({ mark }) => mark.note.trim());
-  const count = view === "highlights" ? highlights.length : comments.length;
-  return <div className="library-collection">
-    <div className="collection-heading"><span>{count} 条{view === "highlights" ? "高亮" : "独立批注"}</span><small>最近修改优先</small></div>
-    <div className="content-grid">
-      {view === "highlights" ? highlights.map(({ page, mark }) => <HighlightCard key={`${page.id}:${mark.id}`} page={page} mark={mark} open={open} />)
-        : comments.map(({ page, mark }) => <article className="content-card comment-card" key={`${page.id}:${mark.id}`} style={{ "--mark": COLORS[mark.color].hex } as CSSProperties}>
-          <div className="content-card-meta"><span><Icon name="comment" size={14} />高亮批注</span><time>{new Date(mark.updatedAt).toLocaleDateString("zh-CN")}</time></div>
-          <p className="standalone-comment">{mark.note}</p>
-          <details className="comment-context"><summary>查看对应高亮</summary><blockquote>{mark.text}</blockquote></details>
-          <Source page={page} open={open} />
-        </article>)}
-      {!count && <div className="collection-empty"><Icon name={view === "highlights" ? "pen" : "comment"} size={30} /><h3>{query ? "没有匹配的内容" : view === "highlights" ? "还没有高亮内容" : "还没有独立批注"}</h3><p>{query ? "调整搜索词，或清空搜索查看全部内容。" : view === "highlights" ? "在网页中选择文字并高亮，摘录和批注会汇集在这里。" : "给高亮写下评论后，批注会汇集在这里。"}</p></div>}
-    </div>
+export function matchesContent(page: Page, mark: Mark, query: string) {
+  return [page.title, page.url, mark.text, mark.note, page.category, ...page.tags].join("\n").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+}
+
+export function ContentCollection({ pages, query, open, filtered = false }: { pages: Page[]; query: string; open: (p: Page) => void; filtered?: boolean }) {
+  const [grouped, setGrouped] = useState(() => {
+    try { return localStorage.getItem("localmark.content.grouped") !== "false"; } catch { return true; }
+  });
+  const groups = pages.map(page => ({ page, marks: page.annotations
+    .filter(mark => matchesContent(page, mark, query))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) }))
+    .filter(group => group.marks.length)
+    .sort((a, b) => b.marks[0].updatedAt.localeCompare(a.marks[0].updatedAt));
+  const count = groups.reduce((sum, group) => sum + group.marks.length, 0);
+  return <div className="library-collection content-collection">
+    <div className="collection-heading"><span>{count} 条高亮 · {groups.length} 个网页</span><div className="content-view-controls">
+      <button type="button" className="group-mode-switch" role="switch" aria-checked={grouped} aria-label="按网页分组" onClick={() => {
+        const next = !grouped; setGrouped(next);
+        try { localStorage.setItem("localmark.content.grouped", String(next)); } catch {}
+      }}><span aria-hidden="true" />按网页分组</button><small>最近修改优先</small>
+    </div></div>
+    {count > 0 ? grouped ? <GroupedContent groups={groups} open={open} renderMark={(page, mark) => <HighlightCard key={mark.id} page={page} mark={mark} open={open} showSource={false} />} /> :
+      <CardFlow className="content-grid" minWidth={310} gap={18} singleColumnBelow={720}>
+        {groups.flatMap(({ page, marks }) => marks.map(mark => ({ page, mark })))
+          .sort((a, b) => b.mark.updatedAt.localeCompare(a.mark.updatedAt))
+          .map(({ page, mark }) => <HighlightCard key={mark.id} page={page} mark={mark} open={open} />)}
+      </CardFlow> : <div className="collection-empty"><Icon name="pen" size={30} /><h3>{query || filtered ? "没有匹配的内容" : "还没有高亮内容"}</h3><p>{query || filtered ? "调整搜索词或取消部分标签，查看其他内容。" : "在网页中选择文字并高亮，摘录和批注会汇集在这里。"}</p></div>}
   </div>;
 }
 
@@ -139,7 +172,7 @@ export function CatalogDetail({ lib, kind, item, draft, change, reset, mutate, o
     {kind !== "colors" && item.id !== UNCATEGORIZED && <button className="catalog-manage" onClick={manage}>合并或删除</button>}
     <div className="collection-heading"><h3>{kind === "colors" ? "关联高亮" : "关联网页"}</h3>{kind !== "colors" && <button onClick={browse}>筛选网页</button>}</div>
     <div className="catalog-related">{kind === "colors" ? pages.flatMap(page => page.annotations.filter(m => m.color === item.id).map(mark => <HighlightCard key={`${page.id}:${mark.id}`} page={page} mark={mark} open={open} />))
-      : pages.map(page => <Source key={page.id} page={page} open={open} />)}
+      : pages.map(page => <PageCard key={page.id} page={page} open={open} />)}
       {!pages.length && <p className="muted">暂时没有关联内容，可以先记录说明。</p>}</div>
   </div>;
 }

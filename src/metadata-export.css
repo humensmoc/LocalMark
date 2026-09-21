@@ -1,0 +1,49 @@
+.export-conflicts { color: #e2e8f0; background: var(--lm-surface, #101010); border: 1px solid #414b49; border-radius: 16px; width: min(1080px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; padding: 0; overflow: auto; box-shadow: 0 20px 80px #0009; scrollbar-width: thin; }
+.export-conflicts::backdrop { background: #000b; }
+.export-conflicts > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 22px 24px 0; }
+.export-conflicts > header > div { min-width: 0; }
+.export-conflicts > header > button { flex: 0 0 auto; white-space: nowrap; min-width: 42px; }
+.export-conflicts h2 { margin: 0; font-size: 21px; }
+.export-conflicts p { overflow-wrap: anywhere; }
+.export-conflicts header p { color: #a4b6b0; font-size: 12px; margin: 8px 0; }
+.export-overview, .export-explanation { margin: 12px 24px; font-size: 13px; line-height: 1.7; }
+.export-overview { color: #8fdbc4; }
+.export-explanation { color: #a7b2af; }
+.export-decisions { margin: 0; padding: 0 24px; border: 0; min-width: 0; }
+.export-batch { padding: 12px; background: #191d1c; border-radius: 9px; margin: 16px 0; }
+.export-conflicts button { white-space: normal; }
+.export-batch .row + .row { margin-top: 8px; }
+.export-batch span { color: #aebcb7; font-size: 12px; }
+.export-conflict { border: 1px solid #3a4742; border-radius: 10px; padding: 16px; margin: 12px 0; min-width: 0; background: #080b0a; }
+.export-conflict-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.export-conflict label { display: flex; gap: 8px; align-items: center; cursor: pointer; min-width: 0; }
+.export-conflict-heading strong { font-size: 14px; overflow-wrap: anywhere; }
+.export-conflict input { width: auto; accent-color: #79d3b6; flex-shrink: 0; }
+.export-choice-state { font-size: 11px; white-space: nowrap; color: #ebcd86; padding: 3px 7px; border-radius: 5px; background: #272416; }
+.export-choice-state.new, .export-choice-state.old { color: #a5e6d2; background: #19332b; }
+.export-file-path { color: #b7c7c1; font-size: 12px; margin: 10px 0 4px; }
+.export-page-url { color: #81998f; font-size: 11px; margin: 0 0 12px; }
+.export-file-choices { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; font-size: 13px; }
+.export-file-choices label { border: 1px solid #3a4c44; border-radius: 6px; padding: 8px 12px; }
+.export-file-choices label:has(input:checked) { border-color: #7cd8be; background: #142a22; }
+.export-conflicts summary { cursor: pointer; font-size: 12px; color: #9ed7c4; padding: 10px 0; }
+.export-difference { margin: 10px 0 16px; min-width: 0; }
+.export-difference h3 { margin: 0 0 8px; font-size: 13px; color: #e4dfc4; }
+.export-comparison { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.export-comparison > div { min-width: 0; border: 1px solid #353b38; border-radius: 6px; overflow: hidden; }
+.export-comparison b { display: block; font-size: 11px; color: #b2bab5; padding: 7px 10px; background: #1b201d; }
+.export-comparison > div + div b { color: #99dfc7; background: #15271f; }
+.export-comparison pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 12px; line-height: 1.7; max-height: 220px; overflow: auto; margin: 0; padding: 10px; }
+.export-conflicts > footer { position: sticky; bottom: 0; background: #101713; border-top: 1px solid #3a4b43; padding: 14px 24px; font-size: 12px; }
+.export-conflicts footer .row { justify-content: flex-end; margin-top: 8px; }
+.export-conflicts footer .error { max-height: 110px; overflow: auto; }
+@media (max-width: 620px) {
+  .export-conflicts { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: 10px; }
+  .export-conflicts > header { padding: 16px 12px 0; }
+  .export-overview, .export-explanation { margin: 10px 12px; }
+  .export-decisions { padding: 0 12px; }
+  .export-conflict { padding: 10px; }
+  .export-conflict-heading { flex-wrap: wrap; }
+  .export-comparison { grid-template-columns: minmax(0, 1fr); }
+  .export-conflicts > footer { padding: 12px; }
+}

@@ -1,6 +1,6 @@
 {
   "name": "local-web-clipper",
-  "version": "0.2.12",
+  "version": "0.2.43",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "test": "vitest run",
     "test:browser": "node tests/native-sidepanel-browser.mjs",
     "test:dashboard": "node tests/dashboard-browser.mjs",
+    "test:catalog": "node tests/catalog-browser.mjs",
     "test:taxonomy": "node tests/taxonomy-browser.mjs"
   },
   "dependencies": {

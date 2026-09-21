@@ -30,7 +30,7 @@ try {
   const page = await context.newPage();
   await page.goto(`${origin}/settings.html`);
   const toggle = page.getByRole("switch", { name: "自动生成 Markdown 文档" });
-  await page.waitForFunction(() => document.querySelector('[role="switch"]')?.disabled === false);
+  await page.waitForFunction(() => document.querySelector('#auto-generate-markdown')?.disabled === false);
   assert.equal(await toggle.isChecked(), false);
   const rpc = async message => {
     const result = await page.evaluate(message => chrome.runtime.sendMessage(message), message);
@@ -39,11 +39,11 @@ try {
   };
   const settle = () => rpc({ type: "snapshot", refresh: true });
   const toggleTo = async enabled => {
-    await page.waitForFunction(() => document.querySelector('[role="switch"]')?.disabled === false);
+    await page.waitForFunction(() => document.querySelector('#auto-generate-markdown')?.disabled === false);
     assert.notEqual(await toggle.isChecked(), enabled);
     await toggle.click();
     await page.waitForFunction(enabled => {
-      const input = document.querySelector('[role="switch"]');
+      const input = document.querySelector('#auto-generate-markdown');
       return input?.checked === enabled && !input.disabled;
     }, enabled);
   };
@@ -108,7 +108,7 @@ try {
   const mdPath = Object.keys(disk).find(name => name.endsWith(".md"));
   assert.ok(disk[mdPath].includes("测试批注"));
   await page.reload();
-  await page.waitForFunction(() => document.querySelector('[role="switch"]')?.disabled === false);
+  await page.waitForFunction(() => document.querySelector('#auto-generate-markdown')?.disabled === false);
   assert.equal(await toggle.isChecked(), true);
   ok("settings switch generates existing annotations and persists after reloading");
 
@@ -122,11 +122,11 @@ try {
   assert.equal(JSON.parse(disk[jsonPath]).comment, "关闭期间的网页评论");
   const second = await context.newPage();
   await second.goto(`${origin}/settings.html`);
-  await second.waitForFunction(() => document.querySelector('[role="switch"]')?.disabled === false);
-  assert.equal(await second.getByRole("switch").isChecked(), false);
+  await second.waitForFunction(() => document.querySelector('#auto-generate-markdown')?.disabled === false);
+  assert.equal(await second.getByRole("switch", { name: "自动生成 Markdown 文档" }).isChecked(), false);
   await toggleTo(true);
   await settle();
-  await second.waitForFunction(() => document.querySelector('[role="switch"]')?.checked === true);
+  await second.waitForFunction(() => document.querySelector('#auto-generate-markdown')?.checked === true);
   assert.ok((await files())[mdPath].includes("关闭期间的网页评论"));
   ok("disabling preserves existing Markdown, JSON stays current, and enabling catches up across settings tabs");
 

@@ -3,7 +3,7 @@ import type { Library, Page } from "./model";
 // File-name migration belongs to the writer, not to the user's pending edit.
 const content = (page: Page) =>
   JSON.stringify({ ...page, markdownFile: undefined,
-    ...(page.schemaVersion === 2 ? { category: undefined, tags: undefined } : {}) });
+    ...(page.schemaVersion !== 1 ? { category: undefined, tags: undefined } : {}) });
 
 /** Merge a writer's isolated snapshot without rolling back edits saved meanwhile. */
 export function mergeSyncResult(

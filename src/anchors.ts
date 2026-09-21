@@ -1,11 +1,17 @@
 import type { Anchor, Mark, Color } from "./model";
+import { locateElement } from "./element-anchors";
+import { existingQuoteLayout, readableQuote } from "./quote-layout";
 export const HOST = "local-web-clipper-root";
+export const TRANSLATION = ".immersive-translate-target-wrapper";
 type Point = { node: Text; offset: number };
 export type TextIndex = { text: string; points: Point[] };
 const excluded =
   'script,style,noscript,template,input,textarea,select,[contenteditable]:not([contenteditable="false"]),[hidden],[aria-hidden="true"],#' +
   HOST;
-export function indexText(root: HTMLElement = document.body): TextIndex {
+export function indexText(
+  root: HTMLElement = document.body,
+  sourceOnly = false,
+): TextIndex {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const points: Point[] = [],
     parts: string[] = [];
@@ -23,7 +29,12 @@ export function indexText(root: HTMLElement = document.body): TextIndex {
   let node: Node | null;
   while ((node = walker.nextNode())) {
     const parent = node.parentElement;
-    if (!parent || parent.closest(excluded)) continue;
+    if (
+      !parent ||
+      parent.closest(excluded) ||
+      (sourceOnly && parent.closest(TRANSLATION))
+    )
+      continue;
     let ancestor: Element | null = parent,
       block: Element | null = null,
       hidden = false;
@@ -156,40 +167,227 @@ export function locate(a: Anchor, index: TextIndex): Range | null {
   // No offset-only fallback: inserted duplicate text could otherwise steal an annotation.
   return null;
 }
+// One DOM Range spanning two source paragraphs also contains the intervening
+// translation. Draw only indexed text nodes, never that enclosing range.
+function splitRange(range: Range, index: TextIndex): Range[] {
+  const ranges: Range[] = [];
+  let current: Range | undefined;
+  let low = 0,
+    high = index.points.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1,
+      p = index.points[middle];
+    if (range.comparePoint(p.node, p.offset) < 0) low = middle + 1;
+    else high = middle;
+  }
+  for (let i = low; i < index.points.length; i++) {
+    const p = index.points[i];
+    if (range.comparePoint(p.node, p.offset) > 0) break;
+    if (p.node === range.endContainer && p.offset >= range.endOffset) continue;
+    if (current?.endContainer === p.node) current.setEnd(p.node, p.offset + 1);
+    else {
+      current = document.createRange();
+      current.setStart(p.node, p.offset);
+      current.setEnd(p.node, p.offset + 1);
+      ranges.push(current);
+    }
+  }
+  return ranges;
+}
+
+function contents(element: Element) {
+  const r = document.createRange();
+  r.selectNodeContents(element);
+  return r;
+}
+
+function translationOwner(wrapper: Element): HTMLElement | null {
+  const owner = wrapper.parentElement;
+  // Only adapt an explicit, unambiguous Immersive Translate unit. No ID or
+  // previous-paragraph heuristic: translated inline elements can duplicate IDs.
+  return owner?.matches('[data-imt-p="1"]') &&
+    owner.querySelectorAll(TRANSLATION).length === 1
+    ? owner
+    : null;
+}
+
+export function captureSelection(
+  range: Range,
+): { anchor: Anchor; text: string; warning?: string } | null {
+  const visible = indexText();
+  const selected = capture(range, visible);
+  if (!selected) return null;
+  const text = readableQuote(splitRange(range, visible));
+  const source = indexText(document.body, true);
+  const original = capture(range, source);
+  const segments: NonNullable<Anchor["segments"]> = original
+    ? [{ source: original }]
+    : [];
+  let translated = false;
+  for (const wrapper of document.querySelectorAll<HTMLElement>(TRANSLATION)) {
+    if (!range.intersectsNode(wrapper)) continue;
+    const quote = capture(range, indexText(wrapper));
+    if (!quote) continue;
+    const owner = translationOwner(wrapper);
+    const sourceQuote = owner && capture(contents(owner), source);
+    if (!sourceQuote || segments.length >= 500) {
+      return {
+        anchor: selected,
+        text,
+        warning: "此译文结构暂不支持关联原文，关闭翻译后可能需要重新绑定。",
+      };
+    }
+    segments.push({ source: sourceQuote, translation: quote });
+    translated = true;
+  }
+  if (!translated)
+    return original
+      ? { anchor: { ...original, basis: "source" }, text }
+      : null;
+  const start = Math.min(...segments.map((s) => s.source.start));
+  const end = Math.max(...segments.map((s) => s.source.end));
+  const combined = domRange(source, start, end);
+  const quote = combined && capture(combined, source);
+  return quote
+    ? { anchor: { ...quote, basis: "source", segments }, text }
+    : null;
+}
+
+export type ResolvedAnchor = { exact: Range[]; context: Range[] };
+export function resolveAnchor(
+  a: Anchor,
+  source = indexText(document.body, true),
+  legacy?: TextIndex,
+): ResolvedAnchor | null {
+  if (a.basis !== "source") {
+    const index = legacy ?? indexText();
+    const r = locate(a, index);
+    return r ? { exact: splitRange(r, index), context: [] } : null;
+  }
+  const result: ResolvedAnchor = { exact: [], context: [] };
+  for (const segment of a.segments ?? [{ source: a }]) {
+    const r = locate(segment.source, source);
+    if (!r) return null; // Partial restoration must not look like full recovery.
+    if (!segment.translation) {
+      result.exact.push(...splitRange(r, source));
+      continue;
+    }
+    let owner = r.startContainer.parentElement;
+    let wrapper: HTMLElement | undefined;
+    const resolved = capture(r, source);
+    while (owner && owner !== document.body) {
+      const candidate = owner.querySelector<HTMLElement>(TRANSLATION);
+      if (candidate && translationOwner(candidate) === owner) {
+        const quote = capture(contents(owner), source);
+        // Offsets may shift between visits; compare to the resolved range.
+        if (
+          quote &&
+          resolved &&
+          quote.start === resolved.start &&
+          quote.end === resolved.end
+        ) {
+          wrapper = candidate;
+          break;
+        }
+      }
+      owner = owner.parentElement;
+    }
+    const translationIndex = wrapper && indexText(wrapper);
+    const translated =
+      translationIndex && locate(segment.translation, translationIndex);
+    if (translated)
+      result.exact.push(...splitRange(translated, translationIndex!));
+    else if (translationIndex?.text.trim()) {
+      result.context.push(...splitRange(contents(wrapper!), translationIndex));
+    } else result.context.push(...splitRange(r, source));
+  }
+  return result;
+}
+
 type HighlightCtor = new (...ranges: Range[]) => unknown;
 type Registry = {
   set(name: string, value: unknown): void;
   delete(name: string): void;
 };
 export class Painter {
+  private visible = true;
+  setVisible(visible: boolean) {
+    this.visible = visible;
+    if (!visible) this.clearHighlights();
+  }
   ranges = new Map<string, Range>();
+  elements = new Map<string, HTMLElement>();
+  target(id: string): Range | HTMLElement | undefined {
+    return this.elements.get(id) ?? this.ranges.get(id);
+  }
+  orderedIds() {
+    const node = (id: string): Node => this.elements.get(id) ?? this.ranges.get(id)!.startContainer;
+    return [...this.ranges.keys(), ...this.elements.keys()].sort((a, b) => {
+      const relation = node(a).compareDocumentPosition(node(b));
+      return relation & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : relation & Node.DOCUMENT_POSITION_PRECEDING ? 1 : a.localeCompare(b);
+    });
+  }
+  private allRanges = new Map<string, Range[]>();
+  approximate = new Set<string>();
+  excerpts = new Map<string, string>();
   private colors: Color[] = ["yellow", "green", "blue", "pink", "purple"];
   paint(marks: Mark[]) {
     if (!marks.length) {
       this.clear();
       return this.ranges;
     }
-    const index = indexText();
+    const source = marks.some(m => m.anchor.kind !== "element") ? indexText(document.body, true) : { text: "", points: [] };
+    const legacy = marks.some((m) => m.anchor.kind !== "element" && m.anchor.basis !== "source")
+      ? indexText()
+      : undefined;
     this.ranges.clear();
+    this.elements.clear();
+    this.allRanges.clear();
+    this.approximate.clear();
+    this.excerpts.clear();
     const grouped = new Map<Color, Range[]>();
+    const context = new Map<Color, Range[]>();
     for (const m of marks) {
-      const r = locate(m.anchor, index);
-      if (r) {
-        this.ranges.set(m.id, r);
-        grouped.set(m.color, [...(grouped.get(m.color) ?? []), r]);
+      if (m.anchor.kind === "element") {
+        const element = locateElement(m.anchor);
+        if (element) this.elements.set(m.id, element);
+        continue;
+      }
+      const resolved = resolveAnchor(m.anchor, source, legacy);
+      if (resolved) {
+        const ranges = [...resolved.exact, ...resolved.context];
+        if (!ranges.length) continue;
+        this.ranges.set(m.id, ranges[0]);
+        this.allRanges.set(m.id, ranges);
+        if (resolved.context.length) this.approximate.add(m.id);
+        if (!resolved.context.length) {
+          const formatted = existingQuoteLayout(m.text, resolved.exact);
+          if (formatted !== m.text) this.excerpts.set(m.id, formatted);
+        }
+        grouped.set(m.color, [
+          ...(grouped.get(m.color) ?? []),
+          ...resolved.exact,
+        ]);
+        context.set(m.color, [
+          ...(context.get(m.color) ?? []),
+          ...resolved.context,
+        ]);
       }
     }
     const api = (CSS as unknown as { highlights?: Registry }).highlights,
       H = (window as unknown as { Highlight?: HighlightCtor }).Highlight;
-    if (api && H)
-      for (const c of this.colors)
+    if (api && H && this.visible)
+      for (const c of this.colors) {
         api.set("wc-" + c, new H(...(grouped.get(c) ?? [])));
+        api.set("wc-context-" + c, new H(...(context.get(c) ?? [])));
+      }
     return this.ranges;
   }
   hit(x: number, y: number) {
     const hits: string[] = [];
-    for (const [id, r] of this.ranges)
-      for (const rect of r.getClientRects())
+    if (!this.visible) return hits;
+    for (const [id, ranges] of this.allRanges)
+      for (const rect of ranges.flatMap((r) => [...r.getClientRects()]))
         if (
           x >= rect.left &&
           x <= rect.right &&
@@ -202,22 +400,38 @@ export class Painter {
     return hits;
   }
   jump(id: string) {
+    const element = this.elements.get(id);
+    if (element?.isConnected) {
+      element.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+      return true;
+    }
     const r = this.ranges.get(id);
     if (!r) return false;
     const el = r.startContainer.parentElement;
     el?.scrollIntoView({ block: "center", behavior: "smooth" });
     const api = (CSS as unknown as { highlights?: Registry }).highlights,
       H = (window as unknown as { Highlight?: HighlightCtor }).Highlight;
-    if (api && H) {
-      api.set("wc-focus", new H(r));
+    if (api && H && this.visible) {
+      if (!this.approximate.has(id))
+        api.set("wc-focus", new H(...(this.allRanges.get(id) ?? [r])));
       setTimeout(() => api.delete("wc-focus"), 1400);
     }
     return true;
   }
   clear() {
     this.ranges.clear();
+    this.elements.clear();
+    this.allRanges.clear();
+    this.approximate.clear();
+    this.excerpts.clear();
+    this.clearHighlights();
+  }
+  private clearHighlights() {
     const api = (CSS as unknown as { highlights?: Registry }).highlights;
-    for (const c of this.colors) api?.delete("wc-" + c);
+    for (const c of this.colors) {
+      api?.delete("wc-" + c);
+      api?.delete("wc-context-" + c);
+    }
     api?.delete("wc-focus");
   }
 }

@@ -4,6 +4,7 @@ import {
   COLORS,
   DEFAULT_CATEGORIES,
   emptyLibrary,
+  compareMarks,
   type Color,
   type Library,
   type Mark,
@@ -11,6 +12,7 @@ import {
 } from "./model";
 import { request, type Request } from "./protocol";
 import { TagBrowser, type TagFilter } from "./TagBrowser";
+import { TagFilters, matchesTagFilter } from "./TagFilters";
 import { PageTags } from "./PageTags";
 import { PageCategory } from "./PageCategory";
 import { PageComment, type CommentDraft } from "./PageComment";
@@ -23,7 +25,7 @@ import { useDashboardLayout } from "./DashboardLayout";
 import { TaxonomyManager } from "./TaxonomyManager";
 import { BulkToolbar } from "./BulkToolbar";
 import { taxonomyToken } from "./taxonomy";
-import { LIBRARY_VIEWS, LibraryNavigation, CatalogGrid, CatalogDetail, ContentCollection, catalogItems, changedDescription, type LibraryView, type CatalogKind, type DescriptionDraft } from "./LibraryViews";
+import { LIBRARY_VIEWS, LibraryNavigation, CatalogGrid, CatalogDetail, ContentCollection, catalogItems, changedDescription, matchesContent, type LibraryView, type CatalogKind, type DescriptionDraft } from "./LibraryViews";
 import "./ui.css";
 import "./dashboard.css";
 
@@ -46,6 +48,7 @@ function Dashboard() {
   const [descriptions, setDescriptions] = useState<Record<string, DescriptionDraft>>({});
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<TagFilter>({ category: "", tags: [] });
+  const [contentFilter, setContentFilter] = useState<TagFilter>({ category: "", tags: [] });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [comments, setComments] = useState<Record<string, CommentDraft>>({});
@@ -125,6 +128,11 @@ function Dashboard() {
   useEffect(() => { setCheckedIds([]); }, [query, filter.category, JSON.stringify(filter.tags)]);
   useEffect(() => {
     if (!lib.taxonomy) return;
+    setContentFilter(old => {
+      const next = { category: lib.taxonomy!.categories.some(item => item.id === old.category) ? old.category : "",
+        tags: old.tags.filter(id => lib.taxonomy!.tags.some(item => item.id === id)) };
+      return JSON.stringify(old) === JSON.stringify(next) ? old : next;
+    });
     setFilter(old => {
       const next = { category: lib.taxonomy!.categories.some(x => x.id === old.category) ? old.category : "",
         tags: old.tags.filter(id => lib.taxonomy!.tags.some(x => x.id === id)) };
@@ -167,7 +175,8 @@ function Dashboard() {
     : null;
   const catalogKind = (["categories", "tags", "colors"].includes(view) ? view : null) as CatalogKind | null;
   const catalogItem = catalogKind ? catalogItems(lib, catalogKind).find(x => x.id === catalogId) : undefined;
-  const aggregate = view === "highlights" || view === "comments";
+  const aggregate = view === "highlights";
+  const contentPages = pages.filter(p => p.annotations.length > 0);
   const viewInfo = LIBRARY_VIEWS.find(x => x.id === view)!;
   function changeView(next: LibraryView) { setView(next); setQuery(""); setCatalogId(""); setCheckedIds([]); setMultiSelect(false); }
   function openSource(p: Page) { setView("pages"); setQuery(""); setFilter({ category: "", tags: [] }); setSelectedId(p.id); }
@@ -251,7 +260,7 @@ function Dashboard() {
             sidebarFooter={sidebarFooter}
             taxonomy={lib.taxonomy}
             selection={multiSelect ? { ids: checkedIds, toggle: id => setCheckedIds(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]) } : undefined}
-            selectionControls={<BulkToolbar key={JSON.stringify([query, filter])} lib={lib} selected={checkedIds}
+            selectionControls={summary => <BulkToolbar key={JSON.stringify([query, filter])} summary={summary} lib={lib} selected={checkedIds}
               active={multiSelect} toggleMode={() => { setMultiSelect(old => !old); setCheckedIds([]); }}
               visible={pages.filter(p => matches(p) && (!filter.category || p.categoryId === filter.category) && filter.tags.every(id => p.tagIds?.includes(id)))}
               select={setCheckedIds} mutate={mutate} />}
@@ -263,21 +272,23 @@ function Dashboard() {
             query={query}
             matches={matches}
             selectedId={selectedId}
-            wholeCard
+            compactCards
             filterDivider={layout.filterDivider}
             open={(p) => setSelectedId(p.id)}
-            annotation={(_p, m) => (
-              <blockquote key={m.id} className="list-excerpt">
-                {m.text}
-                <small>{m.note}</small>
-              </blockquote>
-            )}
           />
         </section> : <section className="dashboard-browser library-browser" aria-label={`${viewInfo.label}列表`}>
           <aside className="library-rail">{navigation}{sidebarFooter}</aside>
           {layout.filterDivider}
           {catalogKind ? <CatalogGrid lib={lib} kind={catalogKind} query={query} selected={catalogId} choose={setCatalogId} manage={() => setManaging("create")} />
-            : <ContentCollection pages={pages} view={view as "highlights" | "comments"} query={query} open={openSource} />}
+            : <div className="aggregate-content">
+              <TagFilters pages={contentPages} categories={categories} tags={tags} filter={contentFilter}
+                change={setContentFilter} taxonomy={lib.taxonomy}
+                matches={p => p.annotations.some(mark => matchesContent(p, mark, query))}
+                title="筛选高亮" storageKey="localmark.filters.dashboard.highlights" />
+              <ContentCollection key={`${query}:${JSON.stringify(contentFilter)}`}
+                pages={contentPages.filter(p => matchesTagFilter(p, contentFilter, lib.taxonomy))} query={query} open={openSource}
+                filtered={!!contentFilter.category || contentFilter.tags.length > 0} />
+            </div>}
         </section>}
         {!aggregate && layout.detailDivider}
         {!aggregate && (catalogKind ? <section className="dashboard-detail" aria-label="内容详情">
@@ -433,7 +444,7 @@ function Dashboard() {
                 )}
                 {page.annotations
                   .slice()
-                  .sort((a, b) => a.anchor.start - b.anchor.start)
+                  .sort(compareMarks)
                   .map((mark) => {
                     const key = `${page.id}:${mark.id}`;
                     return (
@@ -532,13 +543,14 @@ function MarkEditor({
     return (
       <article
         className="mark-editor mark-preview"
-        aria-label="高亮摘录"
+        aria-label={mark.anchor.kind === "element" ? "元素标注" : "高亮摘录"}
         style={{ "--mark": COLORS[mark.color].hex } as React.CSSProperties}
       >
         <div className="mark-preview-heading">
+          {mark.anchor.kind === "element" && <small className="element-kind">元素 · {mark.anchor.tag}</small>}
           <blockquote>{mark.text}</blockquote>
           <button
-            aria-label="编辑高亮"
+            aria-label={mark.anchor.kind === "element" ? "编辑元素标注" : "编辑高亮"}
             onClick={() => {
               setError("");
               change(d);

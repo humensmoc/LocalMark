@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Library } from "./model";
 import type { Request } from "./protocol";
+import { Icon } from "./Icon";
 import { taxonomyToken, UNCATEGORIZED, type TaxonKind, type TaxonomyAction } from "./taxonomy";
 
 export function TaxonomyManager({ lib, mutate, close, initialKind = "categories", initialId, createOnly = false }: {
@@ -24,6 +25,7 @@ export function TaxonomyManager({ lib, mutate, close, initialKind = "categories"
   const count = (id: string) => Object.values(lib.entries).filter(e => kind === "categories"
     ? e.page.categoryId === id : e.page.tagIds?.includes(id)).length;
   const source = catalog.find(x => x.id === editing?.id);
+  const filtered = catalog.filter(x => x.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   async function run(action: TaxonomyAction, expected = editing?.expected ?? taxonomyToken(lib)) {
     setBusy(true); setError(""); setNotice("");
     try {
@@ -34,8 +36,12 @@ export function TaxonomyManager({ lib, mutate, close, initialKind = "categories"
     finally { setBusy(false); }
   }
   return <dialog className="taxonomy-dialog" ref={dialog} aria-label={createOnly ? `新建${noun}` : "分类与标签管理"} onCancel={e => { e.preventDefault(); if (!busy) close(); }}>
-    <div className="row spread"><h2>{createOnly ? `新建${noun}` : "分类与标签管理"}</h2><button disabled={busy} onClick={close}>{createOnly ? "取消" : "关闭管理"}</button></div>
-    {!createOnly && <p>这里的重命名、合并和删除会作用于整个资料库。文章及高亮内容保留。</p>}
+    <header className="taxonomy-header">
+      <div className="taxonomy-heading"><span className="taxonomy-heading-icon"><Icon name={kind === "categories" ? "folder" : "tag"} size={22} /></span>
+        <div><h2>{createOnly ? `新建${noun}` : "分类与标签管理"}</h2><p>{createOnly ? `为资料库添加一个${noun}` : "整理整个资料库的分类与标签，网页和高亮内容会保留。"}</p></div>
+      </div>
+      <button className="taxonomy-close" disabled={busy} onClick={close} aria-label={createOnly ? "取消" : "关闭管理"} title={createOnly ? "取消" : "关闭管理"}><Icon name="close" /></button>
+    </header>
     {lib.taxonomyIssue && <div className="error" role="alert">
       <p>{lib.taxonomyIssue}</p>
       <div className="row wrap">{(["local", "disk"] as const).map(choice => <button key={choice} disabled={busy} onClick={async () => {
@@ -45,20 +51,21 @@ export function TaxonomyManager({ lib, mutate, close, initialKind = "categories"
       }}>{choice === "local" ? "备份后保留浏览器分类" : "备份后读取文件分类"}</button>)}</div>
     </div>}
     <fieldset disabled={busy || !!lib.taxonomyIssue}>
-      {!createOnly && <><div className="row" role="group" aria-label="管理类型">
+      {!createOnly && <><div className="taxonomy-tabs" role="group" aria-label="管理类型">
         {(["categories", "tags"] as const).map(k => <button key={k} aria-pressed={kind === k} onClick={() => {
           setKind(k); setEditing(undefined); setName(""); setQuery(""); setTarget(""); setError(""); setNotice("");
-        }}>{k === "categories" ? "主分类" : "标签"}</button>)}
+        }} aria-label={k === "categories" ? "主分类" : "标签"}><Icon name={k === "categories" ? "folder" : "tag"} size={16} />{k === "categories" ? "主分类" : "标签"}<small>{lib.taxonomy?.[k].length ?? 0}</small></button>)}
       </div>
-      <input aria-label="搜索分类或标签" placeholder="搜索名称…" value={query} onChange={e => setQuery(e.target.value)} />
+      <div className="taxonomy-search"><input aria-label="搜索分类或标签" placeholder={`搜索${noun}名称…`} value={query} onChange={e => setQuery(e.target.value)} /><small>{filtered.length} 个{noun}</small></div>
       <div className="taxonomy-list">
-        {catalog.filter(x => x.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(x => <div className="taxonomy-row" key={x.id}>
-          <span>{x.name}</span><small>{count(x.id)} 篇</small>
-          <button disabled={x.id === UNCATEGORIZED} onClick={() => { setEditing({ id: x.id, expected: taxonomyToken(lib) }); setName(x.name); setTarget(""); setError(""); }}>管理“{x.name}”</button>
-        </div>)}
-        {!catalog.length && <p>暂无{noun}，可以在下方新建。</p>}
+        {filtered.map(x => <button type="button" className={`taxonomy-row${source?.id === x.id ? " selected" : ""}`} key={x.id}
+          aria-label={`管理“${x.name}”`} aria-pressed={source?.id === x.id} disabled={x.id === UNCATEGORIZED}
+          onClick={() => { setEditing({ id: x.id, expected: taxonomyToken(lib) }); setName(x.name); setTarget(""); setError(""); }}>
+          <Icon name={kind === "categories" ? "folder" : "tag"} size={16} /><span>{x.name}</span><small>{count(x.id)} 篇网页</small><Icon name="arrow" size={14} />
+        </button>)}
+        {!filtered.length && <p className="taxonomy-empty">{catalog.length ? "没有匹配的名称" : `暂无${noun}，可以在下方新建。`}</p>}
       </div></>}
-      <form onSubmit={e => {
+      <form className="taxonomy-edit" onSubmit={e => {
         e.preventDefault();
         const duplicate = catalog.find(x => x.name === name.trim() && x.id !== source?.id);
         if (source && duplicate) {
@@ -66,17 +73,18 @@ export function TaxonomyManager({ lib, mutate, close, initialKind = "categories"
             void run({ operation: "merge", kind, id: source.id, targetId: duplicate.id });
         } else void run(source ? { operation: "rename", kind, id: source.id, name } : { operation: "create", kind, name });
       }}>
-        <label>{source ? `重命名“${source.name}”` : `新建${noun}`}<input aria-label="分类或标签名称" maxLength={100} required value={name} onChange={e => setName(e.target.value)} /></label>
-        <div className="row wrap"><button type="submit">{source ? "保存名称" : "新建"}</button>
-          {source && <button type="button" onClick={() => { setEditing(undefined); setName(""); }}>取消编辑</button>}</div>
+        <label>{source ? `重命名“${source.name}”` : `新建${noun}`}<input aria-label="分类或标签名称" placeholder={`输入${noun}名称`} maxLength={100} required value={name} onChange={e => setName(e.target.value)} /></label>
+        <div className="row wrap"><button className="primary" type="submit">{source ? "保存名称" : "新建"}</button>
+          {source && <button className="taxonomy-secondary" type="button" onClick={() => { setEditing(undefined); setName(""); setTarget(""); }}>取消编辑</button>}</div>
       </form>
       {source && <div className="taxonomy-danger">
+        <div className="taxonomy-section-heading"><strong>合并与移除</strong><small>关联 {count(source.id)} 篇网页</small></div>
         <label>转入目标<select aria-label="转入目标" value={target} onChange={e => setTarget(e.target.value)}>
           <option value="">{kind === "categories" ? "未分类（删除时默认）" : "仅移除标签（删除时默认）"}</option>
           {catalog.filter(x => x.id !== source.id).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
         </select></label>
         <div className="row wrap">
-          <button disabled={!target} onClick={() => {
+          <button className="taxonomy-secondary" disabled={!target} onClick={() => {
             if (window.confirm(`将“${source.name}”的 ${count(source.id)} 篇网页并入所选目标，并移除原${noun}？`))
               void run({ operation: "merge", kind, id: source.id, targetId: target });
           }}>合并到目标</button>
@@ -88,6 +96,6 @@ export function TaxonomyManager({ lib, mutate, close, initialKind = "categories"
       </div>}
     </fieldset>
     {error && <p role="alert" className="error">{error}</p>}
-    {notice && <p role="status">{notice}</p>}
+    {notice && <p className="taxonomy-notice" role="status">{notice}</p>}
   </dialog>;
 }

@@ -1,4 +1,4 @@
-import type { Anchor, Color, Library } from "./model";
+import type { MarkAnchor, Color, Library, PageTool } from "./model";
 import type { BulkAction, TaxonomyAction } from "./taxonomy";
 export type Mutation = {
   id?: string;
@@ -7,7 +7,7 @@ export type Mutation = {
   text: string;
   note: string;
   color: Color;
-  anchor: Anchor;
+  anchor: MarkAnchor;
 };
 export type Request =
   | { type: "page-rating"; url: string; title: string; favicon: string; rating: number | null; expectedRating: number | null }
@@ -50,6 +50,7 @@ export type Request =
       expectedTaxonomy?: string;
     }
   | { type: "snapshot"; refresh?: boolean }
+  | { type: "show-page-tools"; enabled: boolean; tool?: PageTool }
   | { type: "auto-generate-markdown"; enabled: boolean }
   | {
       type: "save";

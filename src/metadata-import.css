@@ -1,12 +1,8 @@
 .metadata-import-entry { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .metadata-import-entry button { white-space: nowrap; }
-.metadata-import-entry small { color: #9cabbc; font-size: 11px; }
-.panel > .metadata-import-entry { padding: 5px 12px; border-bottom: 1px solid #354053; flex-shrink: 0; }
-.panel > .metadata-import-entry button { font-size: 12px; padding: 4px 6px; }
-.dashboard-actions .metadata-import-entry small { display: none; }
 .metadata-drop-overlay { position: fixed; inset: 10px; z-index: 10000; pointer-events: none; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px; border: 2px dashed #6ed7bb; border-radius: 12px; background: #102b25f2; color: #eef7f3; }
 .metadata-drop-overlay strong { font-size: 20px; }
-.metadata-import-report { width: min(620px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 18px; color: #e2e8f0; background: #080d12; border: 1px solid #526078; border-radius: 12px; font: 14px/1.6 system-ui, "Microsoft YaHei", sans-serif; }
+.metadata-import-report { width: min(620px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 18px; color: #e2e8f0; background: var(--lm-surface, #000000); border: 1px solid #526078; border-radius: 12px; font: 14px/1.6 system-ui, "Microsoft YaHei", sans-serif; }
 .metadata-import-report::backdrop { background: #0009; }
 .metadata-import-report header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .metadata-import-report h2 { margin: 0; font-size: 18px; }

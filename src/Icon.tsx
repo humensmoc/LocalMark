@@ -1,7 +1,10 @@
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const paths: Record<string, string> = {
     dashboard: "M3 3h18v18H3V3Zm6 0v18m6-18v18M3 8h18",
+    sidebar: "M3 4h18v16H3V4Zm12 0v16m-5-11 3 3-3 3",
     pen: "m15 3 6 6-12 12H3v-6L15 3Zm-10 13 3 3M13 5l6 6",
+    eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Zm13 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
+    "eye-off": "m3 3 18 18M10 5.2A12 12 0 0 1 12 5c6.5 0 10 7 10 7a20 20 0 0 1-3 4M6 6a22 22 0 0 0-4 6s3.5 7 10 7a12 12 0 0 0 5-1M9 9a4.2 4.2 0 0 0 6 6",
     clock: "M12 8v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
     tag: "M3 3h8l10 10-8 8L3 11V3Zm4 4h.01",
     comment: "M4 4h16v12H9l-5 4V4Zm4 4h8m-8 4h5",
