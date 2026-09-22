@@ -162,6 +162,24 @@ try {
     "exact location",
   );
   assert.ok((await drawn("wc-yellow")).includes("网页"));
+  // Saving a comment and receiving sync snapshots must not replace the
+  // existing Highlight or any of its resolved ranges.
+  await page.evaluate(() => {
+    globalThis.noteHighlight = CSS.highlights.get("wc-yellow");
+    globalThis.noteRanges = [...globalThis.noteHighlight];
+  });
+  await page.locator("#mwFw .immersive-translate-target-inner").click();
+  await host.locator("#wc-note").fill("更新评论不重新定位原文");
+  await host.getByRole("button", { name: "确认保存", exact: true }).click();
+  await until(async () => (await marks())[0].note === "更新评论不重新定位原文", "comment persisted");
+  await host.locator(".editor").waitFor({ state: "detached" });
+  await page.waitForTimeout(350); // Include the debounced file-sync notification.
+  assert.ok(await page.evaluate(() => {
+    const current = CSS.highlights.get("wc-yellow");
+    return current === globalThis.noteHighlight &&
+      [...current].every((range, i) => range === globalThis.noteRanges[i]);
+  }), "comment-only saves preserve the highlight registry and ranges");
+  Object.assign(mark, (await marks())[0]);
   await page.mouse.move(5, 5);
   await page.screenshot({ path: join(output, "translation-dual.png") });
   await page.evaluate(() =>
@@ -344,7 +362,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: Chinese UI capture, persistence, original/dual attribute toggle, removal/reinsertion, changed wording, reload in both states, bilingual and ordinary excerpt line breaks in editor/storage, comment-only hover with line breaks, narrow layout, build version, no page errors.",
+    "PASS: Chinese UI capture, comment-only save preserves highlights, persistence, original/dual attribute toggle, removal/reinsertion, changed wording, reload in both states, bilingual and ordinary excerpt line breaks in editor/storage, comment-only hover with line breaks, narrow layout, build version, no page errors.",
   );
 } finally {
   await context.close();

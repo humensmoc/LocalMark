@@ -106,21 +106,27 @@ function path(node: Node) {
   }
   return "body > " + parts.join(" > ");
 }
-export function capture(range: Range, index = indexText()): Anchor | null {
-  // Comparing DOM boundary points handles selections starting on element nodes as well as Text.
-  let start = -1,
-    end = -1;
-  for (let i = 0; i < index.points.length; i++) {
-    const p = index.points[i];
-    if (
-      range.comparePoint(p.node, p.offset) === 0 &&
-      !(p.node === range.endContainer && p.offset >= range.endOffset)
-    ) {
-      if (start < 0) start = i;
-      end = i + 1;
+// Index points are in DOM order, including repeated points at normalized block
+// boundaries. Find both bounds without comparing every character in the page.
+function rangeBounds(range: Range, index: TextIndex) {
+  const bound = (end: boolean) => {
+    let low = 0, high = index.points.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1, p = index.points[middle];
+      const relation = range.comparePoint(p.node, p.offset);
+      const before = end
+        ? relation <= 0 && !(p.node === range.endContainer && p.offset >= range.endOffset)
+        : relation < 0;
+      if (before) low = middle + 1;
+      else high = middle;
     }
-  }
-  if (start < 0) return null;
+    return low;
+  };
+  return { start: bound(false), end: bound(true) };
+}
+export function capture(range: Range, index = indexText()): Anchor | null {
+  // Still compare DOM boundaries so element-based selections work too.
+  let { start, end } = rangeBounds(range, index);
   while (start < end && index.text[start] === " ") start++;
   while (end > start && index.text[end - 1] === " ") end--;
   if (start >= end) return null;
@@ -171,26 +177,16 @@ export function locate(a: Anchor, index: TextIndex): Range | null {
 // translation. Draw only indexed text nodes, never that enclosing range.
 function splitRange(range: Range, index: TextIndex): Range[] {
   const ranges: Range[] = [];
-  let current: Range | undefined;
-  let low = 0,
-    high = index.points.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1,
-      p = index.points[middle];
-    if (range.comparePoint(p.node, p.offset) < 0) low = middle + 1;
-    else high = middle;
-  }
-  for (let i = low; i < index.points.length; i++) {
-    const p = index.points[i];
-    if (range.comparePoint(p.node, p.offset) > 0) break;
-    if (p.node === range.endContainer && p.offset >= range.endOffset) continue;
-    if (current?.endContainer === p.node) current.setEnd(p.node, p.offset + 1);
-    else {
-      current = document.createRange();
-      current.setStart(p.node, p.offset);
-      current.setEnd(p.node, p.offset + 1);
-      ranges.push(current);
-    }
+  const { start, end } = rangeBounds(range, index);
+  for (let i = start; i < end;) {
+    const first = index.points[i];
+    let last = first;
+    while (++i < end && index.points[i].node === first.node) last = index.points[i];
+    const current = document.createRange();
+    current.setStart(first.node, first.offset);
+    // Set an endpoint once per Text node, not once per selected character.
+    current.setEnd(last.node, last.offset + 1);
+    ranges.push(current);
   }
   return ranges;
 }
@@ -309,7 +305,18 @@ type Registry = {
   set(name: string, value: unknown): void;
   delete(name: string): void;
 };
+type CachedAnchor = {
+  key: string;
+  resolved?: ResolvedAnchor | null;
+  element?: HTMLElement | null;
+  text?: string;
+  excerpt?: string;
+};
 export class Painter {
+  private cache = new Map<string, CachedAnchor>();
+  // A DOM/visibility change can make even a previously unique quote ambiguous.
+  // The content observer invalidates synchronously, before its deferred repaint.
+  invalidate() { this.cache.clear(); }
   private visible = true;
   setVisible(visible: boolean) {
     this.visible = visible;
@@ -331,15 +338,17 @@ export class Painter {
   approximate = new Set<string>();
   excerpts = new Map<string, string>();
   private colors: Color[] = ["yellow", "green", "blue", "pink", "purple"];
-  paint(marks: Mark[]) {
+  paint(marks: Mark[], reuse = false) {
+    // Standalone callers retain fresh-DOM semantics. Reuse requires the caller
+    // to observe DOM changes and invalidate, as the content script does.
+    if (!reuse) this.invalidate();
     if (!marks.length) {
       this.clear();
       return this.ranges;
     }
-    const source = marks.some(m => m.anchor.kind !== "element") ? indexText(document.body, true) : { text: "", points: [] };
-    const legacy = marks.some((m) => m.anchor.kind !== "element" && m.anchor.basis !== "source")
-      ? indexText()
-      : undefined;
+    const ids = new Set(marks.map(m => m.id));
+    for (const id of this.cache.keys()) if (!ids.has(id)) this.cache.delete(id);
+    let source: TextIndex | undefined, legacy: TextIndex | undefined;
     this.ranges.clear();
     this.elements.clear();
     this.allRanges.clear();
@@ -348,12 +357,23 @@ export class Painter {
     const grouped = new Map<Color, Range[]>();
     const context = new Map<Color, Range[]>();
     for (const m of marks) {
+      const key = JSON.stringify(m.anchor);
+      let cached = this.cache.get(m.id);
+      if (!cached || cached.key !== key) {
+        cached = { key };
+        if (m.anchor.kind === "element") cached.element = locateElement(m.anchor);
+        else {
+          source ??= indexText(document.body, true);
+          if (m.anchor.basis !== "source") legacy ??= indexText();
+          cached.resolved = resolveAnchor(m.anchor, source, legacy);
+        }
+        this.cache.set(m.id, cached);
+      }
       if (m.anchor.kind === "element") {
-        const element = locateElement(m.anchor);
-        if (element) this.elements.set(m.id, element);
+        if (cached.element) this.elements.set(m.id, cached.element);
         continue;
       }
-      const resolved = resolveAnchor(m.anchor, source, legacy);
+      const resolved = cached.resolved;
       if (resolved) {
         const ranges = [...resolved.exact, ...resolved.context];
         if (!ranges.length) continue;
@@ -361,17 +381,19 @@ export class Painter {
         this.allRanges.set(m.id, ranges);
         if (resolved.context.length) this.approximate.add(m.id);
         if (!resolved.context.length) {
-          const formatted = existingQuoteLayout(m.text, resolved.exact);
-          if (formatted !== m.text) this.excerpts.set(m.id, formatted);
+          if (cached.text !== m.text) {
+            cached.text = m.text;
+            cached.excerpt = existingQuoteLayout(m.text, resolved.exact);
+          }
+          if (cached.excerpt !== undefined && cached.excerpt !== m.text)
+            this.excerpts.set(m.id, cached.excerpt);
         }
-        grouped.set(m.color, [
-          ...(grouped.get(m.color) ?? []),
-          ...resolved.exact,
-        ]);
-        context.set(m.color, [
-          ...(context.get(m.color) ?? []),
-          ...resolved.context,
-        ]);
+        const exactRanges = grouped.get(m.color) ?? [];
+        exactRanges.push(...resolved.exact);
+        grouped.set(m.color, exactRanges);
+        const contextRanges = context.get(m.color) ?? [];
+        contextRanges.push(...resolved.context);
+        context.set(m.color, contextRanges);
       }
     }
     const api = (CSS as unknown as { highlights?: Registry }).highlights,
@@ -419,6 +441,7 @@ export class Painter {
     return true;
   }
   clear() {
+    this.invalidate();
     this.ranges.clear();
     this.elements.clear();
     this.allRanges.clear();

@@ -1,5 +1,22 @@
 # 验证记录
 
+## 0.2.45 长文双语标注性能修复（2026-09-22）
+
+- `npm test`：197项通过，包含新增6项锚点性能/缓存回归。通过穷举DOM元素与文字端点，对照旧线性扫描定义验证二分定位边界等价；11万字符长段落捕获和恢复各少于40次DOM位置比较、恢复少于5次端点写入。覆盖评论/颜色/摘录变更、增删及重绑定、重复原文消歧、译文隐藏/改写/恢复和显隐切换。该次运行在升版前完成，后续仅调整版本源及记录，功能源码未再改动。
+- `npm run build`：0.2.45类型检查及构建通过；package、lock含根包、public/dist manifest五处一致，content/sidepanel/dashboard均嵌入构建版本0.2.45。
+- `node tests/translation-browser.mjs`：隔离Chromium153加载实际0.2.45产物，新增真实评论编辑/保存检查通过，文件同步通知后CSS Highlight对象与Range均保持原对象。既有原文/双语属性切换、译文删除/重插/改写、两种模式刷新、双语与普通摘录换行、评论浮层及420px检查通过，page errors为空。
+- `npm run test:browser`：0.2.45的45组原生侧栏/元素回归通过，`test-results/native-sidepanel-results.json`中errors为空，覆盖划选保存、两侧编辑和跳转、标签页/SPA、未定位重绑定、刷新、元素内容复用/插入、显隐切换、嵌套标注、删除、真实文件同步、320px布局等。
+- `node test-results/performance-diagnosis/benchmark-fixed.mjs`：继续使用上一轮保存的Cozy Games原HTML与27条标注快照，固定原文索引85,769字符和44个译文单元；资源/外部脚本禁用，未改用户原文件。隔离Chromium153.0.8010.12中27条全部恢复。与`bilingual-fresh-report.json`的0.2.44对照，首次完整恢复3,896→110.7ms，后续中位6,363.9→17.8ms，四段双语划选291.3→24.6ms，普通100字符划选125.3→24.1ms，完整恢复Range.comparePoint调用7,557,958→4,227次。耗时样本未插桩，调用数另行测量。缓存更新中位0.2ms仅为Painter测量，非保存端到端耗时；真实评论保存已由上方浏览器用例验证跳过重画。
+- 优化后报告保存在`test-results/performance-diagnosis/bilingual-fixed-report.json`，保留原版对照报告。该测量使用当前源码算法，真实dist交互由上述两组浏览器回归验证；不宣称已测量用户日常标签页。重载扩展并刷新网页后应显示v0.2.45，用户页面版本尚未核实。未运行无关仪表盘回归，未提交Git。
+
+## 0.2.44 空评论提示收紧（2026-09-22）
+
+- `npm run build`（含TypeScript）通过；package、lock含根包、public/dist manifest与content/dashboard/sidepanel内嵌构建版本均为0.2.44。
+- `npm run test:browser`：隔离Chromium153.0.8010.12的45组既有回归通过，报告`test-results/native-sidepanel-results.json`中errors为空；覆盖空文字、轨道、嵌套元素评论、鼠标跟随、退出动画、编辑保存及320px布局。
+- `node test-results/run-compact-hover-qa.mjs`：独立临时布局检查通过，1280/320px下空提示均为61×34.14px，未越过视口边界，显隐前后页面scrollWidth不变；console/page错误为空。报告`test-results/compact-hover-results.json`，已查看`compact-empty-1280.png`、`compact-empty-320.png`、`element-empty-comment.png`。嵌套含非空正文仍保留300px阅读宽度。
+- 临时检查首次误将fixture原有300px输入框造成的窄屏溢出归到浮层，改为显隐前后对比；第二次临时viewport设置影响后续CDP视口测试，拆开专项与原始完整套件后两者通过，产品实现未受影响。没有新增永久测试或重复运行无关功能套件。
+- 用户实际页面未核实；重载扩展并刷新网页后应显示v0.2.44。
+
 ## 0.2.43 关联卡片、占比辨色与空评论悬停（2026-09-21）
 
 - `npm run build`含TypeScript检查通过，五处版本与content/dashboard/sidepanel脚本嵌入版本核对为0.2.43。

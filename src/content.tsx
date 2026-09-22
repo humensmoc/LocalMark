@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   COLORS,
@@ -70,6 +70,11 @@ function App() {
   const current = Object.values(lib.entries).find(
     (e) => e.page.url === url,
   )?.page;
+  // Notes and sync status do not change painted geometry. Snapshots deserialize
+  // fresh objects, so object identity would unnecessarily restore every mark.
+  const paintKey = useMemo(() => JSON.stringify(current?.annotations.map(
+    ({ id, anchor, text, color }) => [id, anchor, text, color],
+  )), [current]);
   const snapshot = useRef({ lib, current, draft, rebind, url, picking, marksVisible });
   snapshot.current = { lib, current, draft, rebind, url, picking, marksVisible };
   const refreshGeneration = useRef(0),
@@ -207,7 +212,7 @@ function App() {
       if (paintTimer) return;
       paintTimer = setTimeout(() => {
         paintTimer = undefined;
-        painter.paint(snapshot.current.current?.annotations ?? []);
+        painter.paint(snapshot.current.current?.annotations ?? [], true);
         setGeometry((v) => v + 1);
         publish();
       }, 250);
@@ -220,8 +225,10 @@ function App() {
               r.target instanceof Element ? r.target : r.target.parentElement
             )?.closest("#" + HOST),
         )
-      )
+      ) {
+        painter.invalidate();
         repaint();
+      }
     });
     observer.observe(document.documentElement, {
       subtree: true,
@@ -407,10 +414,10 @@ function App() {
   }, []);
   useEffect(() => {
     painter.setVisible(marksVisible);
-    painter.paint(current?.annotations ?? []);
+    painter.paint(current?.annotations ?? [], true);
     publish();
     setGeometry((v) => v + 1);
-  }, [current, marksVisible]);
+  }, [url, paintKey, marksVisible]);
   const edit = (m: Mark, x = innerWidth / 2 - 160, y = 100) => {
     clearTimeout(hoverTimer.current);
     setError("");
@@ -726,7 +733,7 @@ function App() {
           onMouseLeave={leaveHover}
         >
           {hoverComments.map(mark => (
-            <p key={mark.id} data-hover-mark={mark.id} className="hover-note">
+            <p key={mark.id} data-hover-mark={mark.id} data-has-comment={!!mark.note.trim()} className="hover-note">
               {mark.note.trim() ? mark.note : "无评论"}
             </p>
           ))}

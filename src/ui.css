@@ -514,6 +514,11 @@ small {
   white-space: pre-wrap;
   pointer-events: auto;
 }
+.tooltip:not(:has(.hover-note[data-has-comment="true"])) {
+  width: max-content;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
 .rail {
   position: fixed;
   top: 20px;
