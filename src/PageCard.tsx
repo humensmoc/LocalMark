@@ -8,6 +8,8 @@ export function PageCard({ page, open, selected, selectedTags = [], selection, c
   selection?: { checked: boolean; toggle: () => void }; className?: string;
 }) {
   const notes = page.annotations.filter(mark => mark.note.trim()).length;
+  const createdAt = new Date(page.createdAt);
+  const createdDate = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}-${String(createdAt.getDate()).padStart(2, "0")}`;
   return <article className={`result-card webpage-card page-surface${(selection ? selection.checked : selected) ? " selected-article" : ""}${selection ? " multi-select-card" : ""} ${className}`}
     onClickCapture={selection ? event => {
       // Native checkbox/label clicks toggle via onChange; other card surfaces
@@ -34,9 +36,14 @@ export function PageCard({ page, open, selected, selectedTags = [], selection, c
       <RatingDots rating={page.rating} />
     </div>
     {page.comment?.trim() && <div className="result-comment"><p title={page.comment}>{page.comment.replace(/\s+/g, " ").trim()}</p></div>}
-    {page.annotations.length > 0 && <div className="result-stats" aria-label={`${page.annotations.length} 条高亮${notes ? `，${notes} 条批注` : ""}`}>
-      <span><strong>{page.annotations.length}</strong><span>高亮</span></span>
-      {notes > 0 && <span><strong>{notes}</strong><span>批注</span></span>}
-    </div>}
+    <div className={`page-card-footer${page.annotations.length ? " has-stats" : ""}`}>
+      {page.annotations.length > 0 && <div className="result-stats" aria-label={`${page.annotations.length} 条高亮${notes ? `，${notes} 条批注` : ""}`}>
+        <span><strong>{page.annotations.length}</strong><span>高亮</span></span>
+        {notes > 0 && <span><strong>{notes}</strong><span>批注</span></span>}
+      </div>}
+      <time className="page-card-date" dateTime={page.createdAt} title={`创建时间：${createdAt.toLocaleString("zh-CN")}`}>
+        {createdDate}
+      </time>
+    </div>
   </article>;
 }
