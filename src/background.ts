@@ -20,6 +20,7 @@ import { DirectoryFiles } from "./files";
 import { SyncEngine } from "./sync";
 import { mergeSyncResult } from "./sync-state";
 import { openSidePanelFromPage } from "./page-bridge";
+import { transcriptRequest } from "./video-transcript";
 import type { Request } from "./protocol";
 import { prepareMetadataImport, validateImportBatch, type ImportRequest } from "./metadata-import";
 import { metadataFilePath } from "./metadata-names";
@@ -428,6 +429,11 @@ async function dispatch(m: Request | ImportRequest, sender: chrome.runtime.Messa
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (["changed", "page-updated"].includes(message?.type)) return false;
+  if (message?.type === "video-transcript") {
+    void transcriptRequest(message, sender).then(data => reply({ ok: true, data }),
+      error => reply({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
   if (message?.type === "open-sidepanel") {
     // Preserve the originating click's user activation: do not queue or await I/O.
     try {

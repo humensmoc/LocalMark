@@ -4,8 +4,14 @@ import { readFile, writeFile } from "node:fs/promises";
 const { version } = JSON.parse(await readFile("package.json", "utf8"));
 const manifest = JSON.parse(await readFile("public/manifest.json", "utf8"));
 const lock = JSON.parse(await readFile("package-lock.json", "utf8"));
-if (manifest.version !== version || lock.version !== version || lock.packages[""].version !== version) {
-  throw new Error("请同步 package.json、package-lock.json 和 public/manifest.json 的版本号后再构建。");
+if (
+  manifest.version !== version ||
+  lock.version !== version ||
+  lock.packages[""].version !== version
+) {
+  throw new Error(
+    "请同步 package.json、package-lock.json 和 public/manifest.json 的版本号后再构建。",
+  );
 }
 await build({
   configFile: false,
@@ -51,6 +57,20 @@ await build({
       name: "LocalWebClipper",
       formats: ["iife"],
       fileName: () => "content.js",
+    },
+  },
+});
+await build({
+  configFile: false,
+  publicDir: false,
+  build: {
+    outDir: "dist",
+    emptyOutDir: false,
+    lib: {
+      entry: resolve("src/video-native.ts"),
+      name: "LocalMarkNativeSubtitles",
+      formats: ["iife"],
+      fileName: () => "video-native.js",
     },
   },
 });

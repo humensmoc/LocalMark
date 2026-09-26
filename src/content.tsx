@@ -21,6 +21,7 @@ import { Floating, FloatingPresence } from "./Floating";
 import style from "./ui.css?inline";
 import { type PageInfo, type PageAction } from "./page-bridge";
 import { useSidePanelToggle } from "./useSidePanelToggle";
+import { mountVideoTranscript } from "./VideoTranscript";
 // Embed this content script's build version, even if the extension is later reloaded.
 declare const __LOCALMARK_VERSION__: string;
 type Draft = {
@@ -768,10 +769,12 @@ function App() {
   const mount = document.createElement("div");
   shadow.append(mount);
   const root = createRoot(mount);
+  const disposeTranscript = mountVideoTranscript();
   let disposed = false;
   instance.dispose = () => {
     if (disposed) return;
     disposed = true;
+    disposeTranscript();
     root.unmount();
     host.remove();
   };

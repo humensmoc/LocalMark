@@ -1,5 +1,30 @@
 # 验证记录
 
+## 0.2.50 Bilibili 页面初始化冲突（2026-09-26）
+
+- 用户截图版本0.2.49。隔离Chromium153用实际BV1VxhU6BEKq页面，分别加载无扩展、旧dist及修复dist。旧版在Vue SSR树仍待接管时插入字幕宿主，复现与截图相同B站bundle中的toLowerCase异常和封面/评论不加载；无扩展正常。下载公开bundle核对调用栈为Vue hydration，$scopedSlots位置为后续组件prepatch；本轮仅实测复现前一条异常。
+- 修复后保留全部原生字幕fetch/XHR监听，只在B站候选容器没有待hydration祖先时插入宿主；重新加载实站，Vue成功挂载后面板出现，pageerror=[]。推荐封面与评论区截图恢复。旧版img元素5个/完成3个，无扩展和修复后均31个/完成27个；不是“所有网络请求成功”。无扩展也出现COLS日志超时，属于独立错误。
+- 实站采样、截图及临时诊断脚本位于`test-results/bili-hydration/`与`test-results/diagnose-bili-hydration.mjs`；已查看with-extension.png和fixed-extension.png。初次临时脚本错误地对页面CDP session调用Extensions.loadUnpacked，修正为BrowserCDPSession后才完成旧版对照；未将工具错误当作产品错误。
+- `npm run build`含TypeScript通过，五处版本和content/sidepanel/dashboard内嵌版本一致为0.2.50。`npm test`：19文件、211项通过。`node tests/video-transcript-browser.mjs`：新增文档load后SSR仍待初始化时不修改子树、替换SSR根节点后再次等待并恢复面板；同时通过两站原有字幕、搜索、语言、时间戳定位暂停、分P/SPA、错误恢复和900/480/320px回归。只有刻意模拟YouTube403的预期console，无未捕获异常。
+- 本轮不重跑无关仪表盘及原有45项侧栏套件。实站验证是隔离未登录浏览器，不是用户现有页面，未测试YouTube登录/机器人限制。用户应重新加载扩展并刷新视频页，核对v0.2.50；仅热加载扩展无法修复旧页面已经中断的初始化。
+
+## 0.2.49 原生字幕来源修复（2026-09-26）
+
+- 用户截图确认当前实际运行0.2.48并存在B站文本串视频、YouTube原生文稿正常而插件HTTP400。开始五处版本0.2.48，最终package/lock顶层及根包/public/dist manifest为0.2.49；构建、类型检查通过，新增MAIN document_start `video-native.js`，保留内嵌页面版本。
+- `npm test`：211项、19文件通过；14项字幕测试覆盖原生响应/DOM优先、HTTP400后已显示文稿可读、新旧DOM、网站按钮只触发一次、旧视频响应拒用、B站默认随实际English、限定原生文件URL、BV/CID/请求身份不符拒绝、禁止独立未签名元数据请求、原生登录限制及后台来源校验。
+- `node tests/video-transcript-browser.mjs`：真实dist加模拟网站脚本，B站元数据通过网站自身XHR发起，YouTube请求必须携带测试网站上下文标记，否则断言失败。验证初始原生English、插件语言切换和网站切回已缓存English、原生文稿打开/语言菜单、先403后点击网站内容转文字自动恢复（不点插件重试）、分P/SPA迟到响应隔离、60行/搜索/纯文本安全、真实HTMLVideoElement跳到5秒并暂停、900/480/320px无溢出。已查看两站宽窄截图；唯一console为刻意模拟403。报告和截图位于`test-results/video-transcript/`；该目录会覆盖同名旧回归截图，不据此重述上一版实测。
+- 公开B站API再次核对BV1VxhU6BEKq/AID117332164744919、P1 CID42197713680及P2 CID42216260147。未取得用户登录页面的错误文件，不能断言“帕尼尼”串片的具体上游原因。CUA连接失败为`Codex auth token is unavailable`，未进行用户实站复测；原有45项侧栏浏览器回归属于0.2.48历史验证，本轮未重跑。
+- 用户需重载扩展并刷新视频页，使document_start监听生效；字幕/侧栏应显示v0.2.49。当前结论为读取路径修复及模拟回归通过，实站效果待用户验证。
+
+## 0.2.48 视频字幕列表（2026-09-26）
+
+- `npm run build`：TypeScript、构建通过；package、lock顶层/根包、public/dist manifest均为0.2.48，content/sidepanel/dashboard内嵌版本一致。
+- `npm test`：19文件、210项通过，新增13项覆盖两站路由与分P、小时格式、YouTube两种文稿结构/语言参数/原生文稿回退、过期初始数据拒用、HTTP/登录/空/坏响应、Bilibili语言与分P及根级登录字段、来源与文档校验。
+- `node tests/video-transcript-browser.mjs`：隔离Chromium加载真实dist，按两站真实域名拦截模拟响应，覆盖指定插入顺序、60行字幕、搜索与空搜索、语言切换、折叠、文本防注入、版本号、真实HTMLVideoElement播放后点击到5秒并暂停、Bilibili换P、YouTube切视频并丢弃旧请求、退出视频页、错误及重试恢复。900/480/320px无横向溢出，已检查两站宽屏和320px截图。`test-results/video-transcript/results.json`中唯一console条目为刻意模拟403的预期网络报错，无未捕获异常。初版测试媒体服务缺少Range支持造成不可seek，已修正测试服务并通过；浏览器检查实际发现并修复MessageSender保留旧URL造成换P误拒绝。
+- `npm run test:browser`：既有45项原生侧栏、文字/元素标注、存储导入及导航回归通过，未捕获错误为空。
+- 实站检查：用户提供的BV1VxhU6BEKq、Z9KSwtVrCMg页面均成功插入面板，开发中间构建证据位于`test-results/video-transcript/*-live.png`及`live-results.json`。未登录Bilibili播放器接口明确返回根级need_login_subtitle=true；YouTube原生内容转文字同样HTTP400/FAILED_PRECONDITION。用户明确接手机器人限制验收，未继续尝试绕过或声称已登录字幕成功；最终登录原因/错误详情由模拟与单元测试验证。
+- 交付后用户需重新加载扩展并刷新视频网页，核对字幕面板或侧栏v0.2.48。未修改用户浏览器安装、登录状态或本地收藏数据。
+
 ## 0.2.47 创建日期与统计同行（2026-09-22）
 
 - `npm run build`含TypeScript检查通过，五处版本与三个页面入口脚本内嵌版本均为0.2.47。`npm run test:catalog`既有7组回归通过，errors为空。
