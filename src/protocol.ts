@@ -1,4 +1,5 @@
-import type { MarkAnchor, Color, Library, PageTool } from "./model";
+import type { MarkAnchor, Color, Library, PageTool, VideoCueRef, VideoMark } from "./model";
+import type { CaptureRect } from "./video-capture";
 import type { BulkAction, TaxonomyAction } from "./taxonomy";
 export type Mutation = {
   id?: string;
@@ -9,7 +10,23 @@ export type Mutation = {
   color: Color;
   anchor: MarkAnchor;
 };
+export type VideoMutation = {
+  id?: string;
+  expectedUpdatedAt?: string;
+  expectedMark?: string;
+  kind: VideoMark["kind"];
+  time: number;
+  trackId?: string;
+  from?: VideoCueRef;
+  to?: VideoCueRef;
+  text: string;
+  note: string;
+  color: Color;
+};
 export type Request =
+  | { type: "page-delete"; pageId: string; expectedUpdatedAt: string }
+  | { type: "video-save"; videoKey: string; url: string; title: string; favicon: string; mark: VideoMutation; captureRect?: CaptureRect }
+  | { type: "video-delete"; pageId: string; id: string; expectedUpdatedAt: string; expectedMark: string }
   | { type: "page-rating"; url: string; title: string; favicon: string; rating: number | null; expectedRating: number | null }
   | { type: "taxonomy"; action: TaxonomyAction; expected: string }
   | { type: "bulk-taxonomy"; selected: Record<string, string>; action: BulkAction; expected: string }

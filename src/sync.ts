@@ -197,7 +197,7 @@ export class SyncEngine {
         continue;
       try {
         await this.files.prepareJsonFile?.(id, e.page.title, e.page.createdAt, e.baseJson);
-        const needsMarkdown = e.page.annotations.length > 0 || !!e.page.comment?.trim();
+        const needsMarkdown = e.page.annotations.length > 0 || !!e.page.videoMarks?.length || !!e.page.comment?.trim();
         if (this.lib.autoGenerateMarkdown === true && needsMarkdown && !e.page.markdownFile) {
           const oldPath = mdPath(e);
           const old = await this.files.read(oldPath);

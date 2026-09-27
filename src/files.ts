@@ -124,6 +124,26 @@ export class DirectoryFiles implements Files {
       throw e;
     }
   }
+  async readBlob(path: string): Promise<Blob | null> {
+    try {
+      const { dir, name } = await this.parent(path);
+      return await (await dir.getFileHandle(name)).getFile();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "NotFoundError") return null;
+      throw error;
+    }
+  }
+  async writeBlob(path: string, value: Blob): Promise<void> {
+    const { dir, name } = await this.parent(path, true);
+    const writer = await (await dir.getFileHandle(name, { create: true })).createWritable();
+    try {
+      await writer.write(value);
+      await writer.close();
+    } catch (error) {
+      try { await writer.abort(); } catch {}
+      throw error;
+    }
+  }
   async write(path: string, value: string) {
     const id = /^data\/([a-f0-9]{16})\.json$/.exec(path)?.[1];
     if (id) {

@@ -40,6 +40,7 @@ type Draft = {
   y: number;
   expanded: boolean;
   url: string;
+  preserveSelection?: boolean;
 };
 const painter = new Painter();
 const instance = {
@@ -264,12 +265,18 @@ function App() {
     window.addEventListener("resize", layout);
     document.addEventListener("load", layout, true);
     let selectionClickPending = false;
-    const down = () => { selectionClickPending = false; };
+    let videoSelectionPending = false;
+    const down = (e: MouseEvent) => {
+      selectionClickPending = false;
+      videoSelectionPending = e.composedPath().some(n => n instanceof Element && n.id === "localmark-video-transcript");
+    };
     const up = (e: MouseEvent) => {
+      const fromVideoTranscript = videoSelectionPending;
+      videoSelectionPending = false;
       if (
-        snapshot.current.picking || snapshot.current.rebind?.anchor.kind === "element" || snapshot.current.draft?.anchor.kind === "element" ||
+        fromVideoTranscript || snapshot.current.picking || snapshot.current.rebind?.anchor.kind === "element" || snapshot.current.draft?.anchor.kind === "element" ||
         e.button !== 0 ||
-        e.composedPath().some((n) => n instanceof Element && n.id === HOST)
+        e.composedPath().some((n) => n instanceof Element && (n.id === HOST || n.id === "localmark-video-transcript"))
       )
         return;
       const target = e.target as Element;
@@ -306,6 +313,7 @@ function App() {
         y: e.clientY + 8,
         expanded: !!binding,
         url: selectionUrl,
+        preserveSelection: true,
       });
     };
     const move = (e: MouseEvent) => {
@@ -385,6 +393,12 @@ function App() {
         setOverlaps(null);
         setRebind(null);
         setPicking(false);
+      } else if (snapshot.current.draft?.preserveSelection &&
+        !e.ctrlKey && !e.metaKey && !e.altKey &&
+        (e.key.length === 1 || e.key === "Process") &&
+        !e.composedPath().includes(instance.host as EventTarget)) {
+        // Keep the selected page text available to Copy until the user starts a note.
+        noteRef.current?.focus({ preventScroll: true });
       }
     };
     const leavePage = () => { lastPointer = null; keepHover(); setHover(null); };
@@ -600,7 +614,7 @@ function App() {
       )}
       <FloatingPresence>{draft && (
         <Floating className="editor" x={draft.x} y={draft.y}
-          focusRef={noteRef} draggable positionKey={draft.anchor}>
+          focusRef={draft.preserveSelection ? undefined : noteRef} draggable positionKey={draft.anchor}>
           <div className={"annotation-composer" + (draft.expanded ? " composer-expanded" : "")}
             role="dialog" aria-label={draft.id ? "编辑标注" : "新建标注"}
             onKeyDown={event => event.stopPropagation()}>

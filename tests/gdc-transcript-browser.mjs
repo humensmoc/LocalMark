@@ -130,6 +130,25 @@ try {
   );
   assert.equal(await panel.locator(".cues img").count(), 0);
   await verifyTranscriptParagraphs(context, p, panel, "gdcvault");
+  await p.evaluate(() => {
+    const root = document.querySelector("#localmark-video-transcript").shadowRoot;
+    const cue = root.querySelector(".cue");
+    cue.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, composed: true, button: 0 }));
+    const range = document.createRange(); range.selectNodeContents(cue);
+    const selection = root.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0, clientX: 1000, clientY: 310 }));
+  });
+  await panel.locator(".video-editor").waitFor();
+  assert.equal(await panel.locator(".video-editor textarea").evaluate(el => el.getRootNode().activeElement === el), false);
+  assert.match(await p.evaluate(() => document.querySelector("#localmark-video-transcript").shadowRoot.getSelection().toString()), /中文字幕/);
+  await p.screenshot({ path: join(out, "annotation-popup-selection.png") });
+  await p.frameLocator("iframe").locator("body").click({ position: { x: 5, y: 5 } });
+  await until(async () => await panel.locator(".video-editor").count() === 0, "GDC iframe click closes annotation editor");
+  report.checks.push("GDC: selecting subtitles keeps focus outside the editor, and clicking the player iframe dismisses it");
+  await p.evaluate(() => {
+    document.querySelector("#localmark-video-transcript").shadowRoot.getSelection()?.removeAllRanges();
+  });
+  await p.mouse.move(5, 5);
   await panel.getByRole("button", { name: "搜索字幕", exact: true }).click();
   await panel.getByRole("searchbox").fill("中文字幕 59");
   assert.equal(await panel.locator(".cue").count(), 1);
@@ -145,6 +164,17 @@ try {
       ),
     "media ready",
   );
+  await frame().evaluate(() => { const video = document.querySelector("video"); video.currentTime = 43.4; video.pause(); });
+  await until(() => frame().evaluate(() => Math.abs(document.querySelector("video").currentTime - 43.4) < 0.1), "GDC locate target time");
+  await panel.getByRole("searchbox").fill("no match");
+  await panel.getByRole("button", { name: "定位当前播放字幕" }).click();
+  await until(async () => await panel.locator('.cue[data-index="43"]').count() === 1 &&
+    await panel.locator('.cue[data-index="43"]').evaluate(cue => {
+      const body = cue.closest(".body").getBoundingClientRect(), rect = cue.getBoundingClientRect();
+      return rect.top >= body.top - 1 && rect.bottom <= body.bottom + 1;
+    }), "GDC locate current cue after clearing search");
+  assert(await frame().evaluate(() => { const video = document.querySelector("video"); return video.paused && Math.abs(video.currentTime - 43.4) < 0.1; }));
+  report.checks.push("GDC: locate button reveals the current iframe playback cue without seeking");
   await frame().evaluate(() => document.querySelector("video").play());
   await hoverCue(p, panel.locator(".cue").nth(5));
   await panel.locator(".cue-time-button").click();
@@ -160,6 +190,41 @@ try {
     async () => (await panel.locator(".cue.active").count()) > 0,
     "active cue",
   );
+  await frame().evaluate(() => { const video = document.querySelector("video"); video.currentTime = 5.4; video.pause(); });
+  await until(() => frame().evaluate(() => Math.abs(document.querySelector("video").currentTime - 5.4) < 0.1), "mark time ready");
+  await panel.getByLabel("当前字幕批注").fill("GDC 关键帧");
+  await panel.getByRole("button", { name: "添加关键帧" }).click();
+  await until(async () => await panel.locator(".cue-marker").count() === 1, "GDC keyframe marker");
+  await frame().evaluate(() => { const video = document.querySelector("video"); video.currentTime = 9; video.pause(); });
+  await panel.locator(".cue-marker button").first().click();
+  await until(() => frame().evaluate(() => {
+    const video = document.querySelector("video");
+    return video.paused && Math.abs(video.currentTime - 5.4) < 0.15;
+  }), "GDC keyframe exact seek");
+  report.checks.push("GDC: keyframe timestamp and icon seek inside iframe");
+  const extensionOrigin = context.serviceWorkers()[0].url().match(/^chrome-extension:\/\/[^/]+/)[0];
+  const settings = await context.newPage();
+  await settings.goto(`${extensionOrigin}/settings.html`);
+  await settings.evaluate(async () => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("LocalMark GDC QA", { create: true });
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("local-web-clipper", 1);
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("kv", "readwrite"); tx.objectStore("kv").put(root, "pendingRoot");
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    const reply = await chrome.runtime.sendMessage({ type: "directory-connected" });
+    if (!reply.ok) throw Error(reply.error);
+  });
+  await p.bringToFront();
+  await panel.getByRole("button", { name: "截图并标注" }).click();
+  await until(async () => await panel.locator(".cue-timeline img.screenshot-image").count() === 1 || await panel.locator(".mark-error").count() > 0, "GDC screenshot result");
+  assert.equal(await panel.locator(".mark-error").count(), 0, await panel.locator(".mark-error").allInnerTexts());
+  report.checks.push("GDC: screenshot captures the iframe video frame and creates a thumbnail");
+  await settings.close();
   await frame().evaluate(() => window.changeLanguage());
   await until(
     async () =>

@@ -190,7 +190,7 @@ export function gdcPageContext(key: string) {
 }
 export function gdcPlayerAction(
   frameUrl: string,
-  action: "describe" | "state" | "seek",
+  action: "describe" | "state" | "seek" | "freeze" | "resume",
   source = "",
   seconds = 0,
 ) {
@@ -221,6 +221,9 @@ export function gdcPlayerAction(
         return { error: "播放器的视频源已变化，请重新加载字幕。" };
       if (!video || !video.readyState)
         return { error: "播放器尚未准备好，请等待视频加载后重试。" };
+      const wasPlaying = !video.paused;
+      if (action === "freeze") video.pause();
+      if (action === "resume") void video.play().catch(() => {});
       if (action === "seek") {
         if (
           !Number.isFinite(seconds) ||
@@ -245,7 +248,10 @@ export function gdcPlayerAction(
         video.currentTime = seconds;
         video.pause();
       }
-      return { currentTime: video.currentTime, language };
+      const rect = video.getBoundingClientRect();
+      return { currentTime: video.currentTime, language, wasPlaying,
+        viewportWidth: innerWidth, viewportHeight: innerHeight,
+        videoRect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } };
     }
     const remote = Array.from(
       player?.remoteTextTrackEls?.() ||
@@ -423,7 +429,7 @@ export async function gdcTranscriptRequest(
   }
 }
 export async function gdcPlaybackRequest(
-  message: { key: string; action: "state" | "seek"; seconds?: number },
+  message: { key: string; action: "state" | "seek" | "freeze" | "resume"; seconds?: number },
   sender: chrome.runtime.MessageSender,
 ) {
   const tabId = validateSender(sender, message.key),
@@ -434,7 +440,7 @@ export async function gdcPlaybackRequest(
     binding.topDocumentId !== sender.documentId
   )
     throw Error("请先加载当前视频字幕。");
-  if (message.action !== "state" && message.action !== "seek")
+  if (!["state", "seek", "freeze", "resume"].includes(message.action))
     throw Error("无效的播放器操作。");
   if (message.action === "seek") {
     const ctx = await context(sender, message.key);

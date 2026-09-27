@@ -1,5 +1,65 @@
 # 验证记录
 
+## 0.3.18 字幕左侧时间列收窄（2026-09-27）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 与页面内嵌版本为 0.3.18，`git diff --check` 通过。
+- `node tests/video-transcript-browser.mjs` 与 `node tests/gdc-transcript-browser.mjs` 通过：YouTube、Bilibili、GDC Vault 在 900/480/320px 下正文距内容区左边缘为 58px、时间与正文保持间距，字幕无横向溢出；时间戳、搜索、定位、语言、截图及 SPA/iframe 回归通过。GDC 目标字幕可能已在可见区，因此定位断言核对目标可见和播放时间不变，不要求固定滚动量。
+- `node tests/video-annotations-browser.mjs` 通过：标记轨道、截图/关键帧、文字标注、明暗主题及 320px 布局正常，errors=[]。已查看 GDC、YouTube 和带标注字幕的窄屏截图；YouTube 字幕回归仅有测试故意模拟 HTTP 403 的预期提示。测试使用隔离模拟站点，未在用户实际页面核实新版加载情况。
+
+## 0.3.17 选区复制、视频标注窗关闭与文件名按钮（2026-09-27）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 与页面内嵌版本均为 0.3.17，`git diff --check` 通过。
+- `node tests/annotation-composer-browser.mjs` 通过：真实鼠标划词后选区仍可见，Ctrl+C 复制原文；直接打字转入批注，保存、拖动、颜色、窄屏与旧标注编辑正常。已查看选区与浮窗同屏截图。
+- `node tests/native-sidepanel-browser.mjs` 通过：复制文件名按钮在未定位时保持显示且禁用；资料刷新和文件迁移期间为同一 DOM 按钮，未转禁用，完成后可复制；普通网页划词、保存及 320px 侧栏回归通过，无未捕获错误。
+- `node tests/video-annotations-browser.mjs`、`node tests/gdc-transcript-browser.mjs` 通过：字幕选区在浮窗出现后保留，打字聚焦批注；点击外部页面和 GDC 播放器 iframe 关闭浮窗。截图/关键帧、明暗主题、320px 与字幕回归通过，errors=[]。已查看 GDC 选区浮窗和视频窄屏截图。
+- `node tests/video-transcript-browser.mjs` 通过 YouTube/Bilibili 字幕来源、时间戳、搜索、定位、截图、320px 与 SPA/SSR 回归；唯一 console 提示来自故意模拟的 HTTP 403。以上均使用隔离浏览器和模拟站点，未在用户实际页面核实新版加载情况。
+
+## 0.3.16 字幕划词穿过悬停时间戳（2026-09-27）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 与内容脚本内嵌版本均为 0.3.16。`git diff --check` 无空白错误。
+- `node tests/video-annotations-browser.mjs` 通过：真实鼠标使时间戳浮层出现后按下划词，拖过其原位置时浮层收起，选区不含时间戳文字且正常打开标注窗；跨句、反向选区、旧批注编辑、截图/关键帧、明暗主题和 320px 回归通过，pageerror=[]。
+- `node tests/video-transcript-browser.mjs`、`node tests/gdc-transcript-browser.mjs` 通过：Bilibili、YouTube、GDC Vault 的时间戳点击、定位暂停、搜索、语言、截图及窄屏回归正常；GDC errors=[]，YouTube 仅有故意模拟 403 的预期 console 提示。`node tests/native-sidepanel-browser.mjs` 通过，普通网页划词/高亮及侧栏回归正常。
+- 测试使用隔离模拟网页与资料目录；尚未在用户实际页面核实其加载版本和拖拽路径。
+
+## 0.3.15 字幕高亮恢复三等分（2026-09-27）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 为 0.3.15，页面构建版本同步。`git diff --check` 无空白错误。
+- `node tests/video-annotations-browser.mjs` 通过：八种悬停、标注、播放状态组合均保留固定三段背景边界（33.333%/66.667%）及独立的悬停下划线；原评论、截图、关键帧跳转、明暗主题与 320px 回归通过，pageerror=[]。已查看三态叠加放大截图：上段底色、中段黄色标注、下段蓝色播放位置、文字底部橙色下划线。
+- `node tests/gdc-transcript-browser.mjs` 通过，GDC Vault iframe 字幕及定位回归正常，errors=[]。测试使用隔离模拟页面；未核实用户当前实际网页是否加载 v0.3.15。
+
+## 0.3.14 当前字幕定位、下划线与时间点卡片跳转（2026-09-27）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 为 0.3.14，内容脚本与侧栏显示构建版本。`git diff --check` 无空白错误。
+- `node tests/video-annotations-browser.mjs`：八种悬停/标注/播放组合均保持相同橙色下划线与独立标注/播放背景；截图和关键帧评论卡片的非文字区域点击跳到自身精确时间，未打开编辑窗；侧栏截图图片、关键帧类别/文字及两类卡片空白区域跳转到自身精确时间。原截图存取、评论跳转、编辑删除、跨语言、失败恢复、明暗主题及 320px 回归通过，pageerror=[]。已查看下划线、新定位图标及侧栏窄屏截图。
+- `node tests/video-transcript-browser.mjs` 与 `node tests/gdc-transcript-browser.mjs`：YouTube、Bilibili、GDC Vault 隔离模拟播放器中，将时间设为 43.4 秒且搜索排除当前句后，点击定位按钮会清空搜索并滚动到对应字幕，播放器时间及暂停状态不变；其余字幕来源、搜索、时间跳转、截图/关键帧、窄屏和 SPA/iframe 回归通过。YouTube 唯一 console 错误是测试故意模拟的 HTTP 403；GDC errors=[]。用户截图右下角为 v0.3.13，尚未核实实际网页是否加载 v0.3.14。
+
+## 0.3.13 字幕高亮组合与评论关联（2026-09-27）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 与内容脚本内嵌版本均为 0.3.13。`git diff --check` 无空白错误。与本轮并行的整页删除改动也包含在最终构建中，其验证另见 `Progression.md`。
+- `node tests/video-annotations-browser.mjs`：八种悬停/标注/播放状态组合的三个背景区域分别保持固定颜色；字幕批注悬停覆盖精确句子且可与播放状态叠加，截图批注只点亮对应图片，关键帧批注只点亮对应书签；键盘聚焦与离开清除也通过。原划词、图片、评论跳转、编辑删除、跨语言、存储失败、明暗主题、320px 无横向溢出等检查通过，pageerror=[]。已查看 `test-results/video-annotations/` 中三态及三类评论悬停截图。
+- `node tests/video-transcript-browser.mjs` 与 `node tests/gdc-transcript-browser.mjs`：YouTube、Bilibili、GDC Vault 隔离模拟播放器的字幕来源、悬停时间、播放定位、搜索、关键帧、截图、窄屏及 SPA/iframe 回归通过。YouTube 唯一 console 错误是测试故意模拟的 HTTP 403；GDC errors=[]。用户提供的 GDC 截图显示 v0.3.11，未核对用户实际页面是否已加载 v0.3.13。
+
+## 0.3.9 时间点批注图示与侧栏图片交互（2026-09-27）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 及内容脚本、侧栏、仪表盘内嵌版本均为 0.3.9。`npm test`：23 文件 244 项通过；`git diff --check` 无空白错误。
+- `node tests/video-annotations-browser.mjs`：截图批注行出现对应小缩略图和时间，关键帧批注行出现书签图标和时间，类型字不再出现在标题位置；侧栏原卡片保留图片但悬停无大图，也不加入键盘焦点；仪表盘图片悬停预览保留。其余隔离播放器截图保存、JSON/Markdown、删除、断开目录/写入失败、选区编辑、明暗主题和 320px 无横向溢出检查通过，pageerror=[]。截图与报告见 `test-results/video-annotations/`。
+- 浏览器检查在合成网页和隔离 OPFS 文件夹进行；未核实用户实际页面版本、真实连接目录和其已有图片。重新加载扩展并刷新网页后应看到 v0.3.9。
+
+## 0.3.8 截图预览、卡片图片与真实划词修复（2026-09-27）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 与三个入口内嵌版本均为 0.3.8。`npm test`：23 文件 244 项通过。`git diff --check` 无空白错误；未提交 Git。
+- `node tests/video-annotations-browser.mjs`：真实鼠标按下、跨句拖动、松开后出现字幕标注浮窗；保留半句整句高亮、反向划选、重叠批注编辑删除。截图 PNG 用隔离 OPFS 目录保存，临时注入的红色播放器底栏未进入图片且截图后页面控件恢复；句内显示小缩略图与书签并列、无横线。纯图片悬停预览在 1440px 与 320px 视口内，宽屏预览宽度至少 350px。两张同句截图在侧栏和仪表盘原卡片顶部以缩略图显示，悬停放大；JSON/Markdown、跨语言、删除清理、目录断开/写入失败、明暗主题及窄屏回归通过，pageerror=[]。截图与报告见 `test-results/video-annotations/`。
+- `node tests/video-transcript-browser.mjs` 与 `node tests/gdc-transcript-browser.mjs`：YouTube、Bilibili 和 GDC Vault iframe 模拟播放器均可新建无控件截图与句内缩略图，原有字幕读取/语言/搜索/精确暂停、SSR/SPA/iframe、错误恢复及窄屏检查通过。YouTube 故意模拟 HTTP 403 有预期 console；GDC errors=[]。
+- `node tests/native-sidepanel-browser.mjs`、`node tests/dashboard-browser.mjs`：旧网页文字/元素标注和原管理卡片回归通过。测试使用合成站点与隔离目录，未核实用户浏览器的实际页面版本；已保存的旧截图图片不会自动改写，需重新截图才能得到无控件画面。重载扩展并刷新网页后应看到 v0.3.8。
+
+## 0.3.7 字幕标注、关键帧与本地截图（2026-09-27）
+
+- `npm run build` 包含 TypeScript 检查并重建 dist；`package.json`、`package-lock.json` 顶层及根包、`public/manifest.json`、`dist/manifest.json` 均为 0.3.7。字幕窗和侧栏使用构建时内嵌版本。`git diff --check` 没有空白错误。
+- `npm test`：23 文件、244 项通过。新增 4 项视频时间归属、精确文字定位、语言隔离、版本 4 与截图路径校验。
+- `node tests/video-annotations-browser.mjs`：隔离 Chromium + OPFS 资料目录中，验证半句跨句整句高亮、下一行批注、反向选择、重叠批注独立编辑删除、颜色修改、当前句快捷批注、同一时间的两个图标分离、关键帧精确跳转暂停、截图 PNG 写入/按需预览/删除清理、JSON 和 Markdown 同步、文字轨道切回原语言、时间点跨语言重归属、断开目录及图片写入失败时不创建记录；明暗主题与 320px 无面板横向溢出，pageerror=[]。截图及报告位于 `test-results/video-annotations/`。
+- `node tests/video-transcript-browser.mjs` 和 `node tests/gdc-transcript-browser.mjs`：三站模拟播放器均通过关键帧自身时间跳转与原有字幕读取、语言、搜索、SSR/SPA/iframe、错误恢复及窄屏回归。YouTube 的唯一 console 错误来自测试故意模拟 HTTP 403；GDC errors=[]。
+- `node tests/native-sidepanel-browser.mjs`、`node tests/dashboard-browser.mjs` 通过，旧网页文字/元素标注及管理界面回归正常。测试使用合成站点和隔离目录，尚未核实用户当前浏览器页面或真实资料目录权限；重载扩展并刷新视频网页后，应在字幕窗及侧栏看到 v0.3.7。
+
 ## 0.3.6 顶部删除与展开后保存（2026-09-27）
 
 - `npm run build`含TypeScript通过；package、lock顶层/根包、public/dist manifest及三个入口构建版本0.3.6。`git diff --check`通过，未提交Git。

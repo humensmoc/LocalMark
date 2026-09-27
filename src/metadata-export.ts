@@ -149,7 +149,7 @@ export async function exportMetadata(root: FileSystemDirectoryHandle, pages: Pag
 }
 
 const labels: Record<string, string> = { title: "网页标题", url: "网址", originalUrl: "原始网址", category: "主分类", tags: "标签",
-  comment: "网页评论", rating: "评分", createdAt: "首次收藏时间", updatedAt: "修改时间", annotations: "高亮与批注",
+  comment: "网页评论", rating: "评分", createdAt: "首次收藏时间", updatedAt: "修改时间", annotations: "高亮与批注", videoMarks: "视频标注",
   text: "摘录内容", note: "批注", color: "高亮颜色", anchor: "定位信息", id: "网页 ID", categoryId: "主分类 ID", tagIds: "标签 ID",
   favicon: "网页图标", folderName: "文件夹名称", markdownFile: "Markdown 文件名", schemaVersion: "元数据格式版本" };
 const display = (value: unknown) => value === undefined ? "（不存在）" : typeof value === "string" ? value || "（空）" : JSON.stringify(value, null, 2);

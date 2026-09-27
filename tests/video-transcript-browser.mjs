@@ -192,6 +192,26 @@ try {
     await context.browser().newBrowserCDPSession()
   ).send("Extensions.loadUnpacked", { path: resolve("dist") });
   await manager.close();
+  if (!live) {
+    const extensionOrigin = context.serviceWorkers()[0].url().match(/^chrome-extension:\/\/[^/]+/)[0];
+    const settings = await context.newPage();
+    await settings.goto(`${extensionOrigin}/settings.html`);
+    await settings.evaluate(async () => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("LocalMark Video QA", { create: true });
+      const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open("local-web-clipper", 1);
+        request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+      });
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction("kv", "readwrite"); tx.objectStore("kv").put(root, "pendingRoot");
+        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+      const reply = await chrome.runtime.sendMessage({ type: "directory-connected" });
+      if (!reply.ok) throw Error(reply.error);
+    });
+    await settings.close();
+  }
   for (const site of ["bilibili", "youtube"]) {
     console.log("Checking", site);
     mode = "normal";
@@ -286,6 +306,14 @@ try {
           .evaluate((v) => v.seekable.length > 0 && v.seekable.end(0) > 10),
       "media seekable",
     );
+    await p.locator("video").evaluate(v => { v.currentTime = 43.4; v.pause(); });
+    await until(() => p.locator("video").evaluate(v => Math.abs(v.currentTime - 43.4) < 0.1), "locate target time");
+    await search.fill("no match");
+    await panel.getByRole("button", { name: "定位当前播放字幕" }).click();
+    await until(async () => await panel.locator('.cue[data-index="43"]').count() === 1 &&
+      await panel.locator(".body").evaluate(body => body.scrollTop > 30), "locate current cue after clearing search");
+    assert(await p.locator("video").evaluate(v => v.paused && Math.abs(v.currentTime - 43.4) < 0.1));
+    report.checks.push(`${site}: locate button scrolls filtered transcript to current playback cue without seeking`);
     await p.locator("video").evaluate(async (v) => {
       await Promise.race([
         v.play(),
@@ -321,6 +349,19 @@ try {
       );
       throw error;
     }
+    await p.locator("video").evaluate(v => { v.currentTime = 5.4; v.pause(); });
+    await until(() => p.locator("video").evaluate(v => Math.abs(v.currentTime - 5.4) < 0.1), "mark time ready");
+    await panel.getByLabel("当前字幕批注").fill(`${site} 关键帧`);
+    await panel.getByRole("button", { name: "添加关键帧" }).click();
+    await until(async () => await panel.locator(".cue-marker").count() === 1, "keyframe marker");
+    await p.locator("video").evaluate(v => { v.currentTime = 9; v.pause(); });
+    await panel.locator(".cue-marker button").first().click();
+    await until(() => p.locator("video").evaluate(v => v.paused && Math.abs(v.currentTime - 5.4) < 0.15), "keyframe exact seek");
+    report.checks.push(`${site}: keyframe timestamp and icon seek`);
+    await panel.getByRole("button", { name: "截图并标注" }).click();
+    await until(async () => await panel.locator(".cue-timeline img.screenshot-image").count() === 1 || await panel.locator(".mark-error").count() > 0, "screenshot thumbnail");
+    assert.equal(await panel.locator(".mark-error").count(), 0, await panel.locator(".mark-error").allInnerTexts());
+    report.checks.push(`${site}: video-only screenshot and inline thumbnail`);
     await panel.getByLabel("字幕语言", { exact: true }).selectOption("zh");
     await until(
       async () =>

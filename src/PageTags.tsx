@@ -7,12 +7,14 @@ export function PageTags({
   change,
   browse,
   counts,
+  compact = false,
 }: {
   tags: string[];
   allTags: string[];
   counts: Map<string, number>;
   change: (tag: string, action: "add" | "remove") => Promise<void>;
   browse: (tag: string) => void;
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false),
     [query, setQuery] = useState(""),
@@ -39,7 +41,7 @@ export function PageTags({
   }
   return (
     <section className="page-tags" aria-label="网页标签">
-      <div className="section-title">小标签 · 可多选</div>
+      {!compact && <div className="section-title">小标签 · 可多选</div>}
       <div className="row wrap">
         <button
           className="tag-add"

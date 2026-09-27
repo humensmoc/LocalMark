@@ -2,12 +2,13 @@ import { useState } from "react";
 
 export type CommentDraft = { value: string; base: string };
 
-export function PageComment({ comment, draft, change, reset, save }: {
+export function PageComment({ comment, draft, change, reset, save, compact = false }: {
   comment: string;
   draft?: CommentDraft;
   change: (draft: CommentDraft) => void;
   reset: () => void;
   save: (draft: CommentDraft) => Promise<void>;
+  compact?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -28,9 +29,10 @@ export function PageComment({ comment, draft, change, reset, save }: {
   }
   return (
     <section className="page-comment" aria-label="网页评论区域">
-      <label htmlFor="wc-page-comment">网页评论</label>
+      {!compact && <label htmlFor="wc-page-comment">网页评论</label>}
       <textarea
         id="wc-page-comment"
+        aria-label={compact ? "网页评论" : undefined}
         placeholder="写下对这个网页的想法，无需选中文字…"
         value={value}
         maxLength={100000}
@@ -43,8 +45,8 @@ export function PageComment({ comment, draft, change, reset, save }: {
           }
         }}
       />
-      <div className="row spread wrap">
-        <small>{changed ? "有未保存的修改" : "无需高亮，可单独保存"}</small>
+      <div className={compact ? "row wrap comment-actions-compact" : "row spread wrap"}>
+        {!compact && <small>{changed ? "有未保存的修改" : "无需高亮，可单独保存"}</small>}
         <button className="primary" disabled={!changed || busy} onClick={() => void submit()}>
           {busy ? "保存中…" : "保存评论"}
         </button>

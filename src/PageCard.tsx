@@ -7,7 +7,8 @@ export function PageCard({ page, open, selected, selectedTags = [], selection, c
   page: Page; open: (page: Page) => void; selected?: boolean; selectedTags?: string[];
   selection?: { checked: boolean; toggle: () => void }; className?: string;
 }) {
-  const notes = page.annotations.filter(mark => mark.note.trim()).length;
+  const videoCount = page.videoMarks?.length ?? 0;
+  const notes = [...page.annotations, ...(page.videoMarks ?? [])].filter(mark => mark.note.trim()).length;
   const createdAt = new Date(page.createdAt);
   const createdDate = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}-${String(createdAt.getDate()).padStart(2, "0")}`;
   return <article className={`result-card webpage-card page-surface${(selection ? selection.checked : selected) ? " selected-article" : ""}${selection ? " multi-select-card" : ""} ${className}`}
@@ -36,9 +37,10 @@ export function PageCard({ page, open, selected, selectedTags = [], selection, c
       <RatingDots rating={page.rating} />
     </div>
     {page.comment?.trim() && <div className="result-comment"><p title={page.comment}>{page.comment.replace(/\s+/g, " ").trim()}</p></div>}
-    <div className={`page-card-footer${page.annotations.length ? " has-stats" : ""}`}>
-      {page.annotations.length > 0 && <div className="result-stats" aria-label={`${page.annotations.length} 条高亮${notes ? `，${notes} 条批注` : ""}`}>
-        <span><strong>{page.annotations.length}</strong><span>高亮</span></span>
+    <div className={`page-card-footer${page.annotations.length || videoCount ? " has-stats" : ""}`}>
+      {(page.annotations.length > 0 || videoCount > 0) && <div className="result-stats" aria-label={`${page.annotations.length} 条高亮${videoCount ? `，${videoCount} 条视频标注` : ""}${notes ? `，${notes} 条批注` : ""}`}>
+        {page.annotations.length > 0 && <span><strong>{page.annotations.length}</strong><span>高亮</span></span>}
+        {videoCount > 0 && <span><strong>{videoCount}</strong><span>视频</span></span>}
         {notes > 0 && <span><strong>{notes}</strong><span>批注</span></span>}
       </div>}
       <time className="page-card-date" dateTime={page.createdAt} title={`创建时间：${createdAt.toLocaleString("zh-CN")}`}>

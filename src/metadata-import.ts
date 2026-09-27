@@ -47,7 +47,7 @@ export async function prepareMetadataImport(library: Library, files: ImportFile[
       const candidate = { ...next, taxonomy: structuredClone(next.taxonomy) };
       page.categoryId = ensureTaxon(candidate, "categories", category).id;
       page.tagIds = [...new Set(tags.map(name => ensureTaxon(candidate, "tags", name).id))];
-      page.schemaVersion = page.schemaVersion === 3 ? 3 : 2;
+      page.schemaVersion = page.schemaVersion === 4 ? 4 : page.schemaVersion === 3 ? 3 : 2;
       projectPage(candidate, page);
       TaxonomySchema.parse(candidate.taxonomy);
       // The current folder chooses its own free Markdown name if export is enabled.

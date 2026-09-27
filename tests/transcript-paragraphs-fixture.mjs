@@ -132,6 +132,14 @@ export async function verifyTranscriptParagraphs(context, page, panel, site) {
     });
     const box = await clock.boundingBox();
     assert(box.x >= 0 && box.x + box.width <= width + 1);
+    const column = await panel.locator(".subtitle-paragraph").first().evaluate(row => {
+      const time = row.querySelector(".paragraph-time").getBoundingClientRect();
+      const text = row.querySelector(".paragraph-text").getBoundingClientRect();
+      const shell = row.closest(".body-shell").getBoundingClientRect();
+      return { gutter: text.left - shell.left, gap: text.left - time.right };
+    });
+    assert(column.gutter <= 65, `subtitle text starts too far from the rail at ${width}px: ${column.gutter}px`);
+    assert(column.gap >= 5, `subtitle time overlaps the text at ${width}px`);
     assert(
       await panel.evaluate(
         (h) =>
@@ -139,7 +147,7 @@ export async function verifyTranscriptParagraphs(context, page, panel, site) {
           h.clientWidth + 1,
       ),
     );
-    layouts.push({ width, clock: box });
+    layouts.push({ width, clock: box, column });
     if (width === 320)
       await page.screenshot({ path: `${out}/${site}-320.png` });
     await page.keyboard.press("Escape");

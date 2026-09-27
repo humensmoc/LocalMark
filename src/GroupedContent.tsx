@@ -1,11 +1,11 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import type { Page, Mark } from "./model";
+import type { Page, Mark, VideoMark } from "./model";
 import { PageCard } from "./PageCard";
 import { groupedLayout } from "./grouped-layout";
 
 export function GroupedContent({ groups, open, renderMark }: {
-  groups: { page: Page; marks: Mark[] }[]; open: (page: Page) => void;
-  renderMark: (page: Page, mark: Mark) => ReactNode;
+  groups: { page: Page; marks: (Mark | VideoMark)[] }[]; open: (page: Page) => void;
+  renderMark: (page: Page, mark: Mark | VideoMark) => ReactNode;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [geometry, setGeometry] = useState<ReturnType<typeof groupedLayout>>();

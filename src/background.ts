@@ -5,6 +5,7 @@ import {
   pageId,
   folderName,
   MarkSchema,
+  VideoMarkSchema,
   HighlightPaletteSchema,
   PageSchema,
   PageTagsSchema,
@@ -17,7 +18,11 @@ import {
   type Library,
   type Page,
 } from "./model";
+import { videoTarget } from "./video-transcript";
+import { videoPageUrl } from "./video-marks";
+import { captureVideoImage, imagePreview } from "./video-capture";
 import { DirectoryFiles } from "./files";
+import { deletePageData } from "./page-delete";
 import { SyncEngine } from "./sync";
 import { mergeSyncResult } from "./sync-state";
 import { openSidePanelFromPage } from "./page-bridge";
@@ -26,7 +31,7 @@ import { gdcPlaybackRequest } from "./gdc-transcript";
 import type { Request } from "./protocol";
 import { prepareMetadataImport, validateImportBatch, type ImportRequest } from "./metadata-import";
 import { metadataFilePath } from "./metadata-names";
-import { migrateTaxonomy, manageTaxonomy, bulkTaxonomy, ensureTaxon, projectPage, taxonomyToken } from "./taxonomy";
+import { migrateTaxonomy, manageTaxonomy, bulkTaxonomy, ensureTaxon, projectPage, taxonomyToken, UNCATEGORIZED } from "./taxonomy";
 let queue: Promise<unknown> = Promise.resolve();
 const serial = <T>(fn: () => Promise<T>): Promise<T> => {
   const next = queue.then(fn, fn);
@@ -126,6 +131,99 @@ function scheduleSync(id = "") {
 }
 function isLibraryUI(sender: chrome.runtime.MessageSender) {
   return ["dashboard.html", "sidepanel.html"].some(path => sender.url === chrome.runtime.getURL(path));
+}
+async function videoRoot(mode: "read" | "readwrite") {
+  const root = await db.get<FileSystemDirectoryHandle>("root");
+  if (!root || await root.queryPermission({ mode }) !== "granted")
+    throw Error("请先在设置中连接并授权 LocalMark 资料文件夹。");
+  return new DirectoryFiles(root);
+}
+async function videoMutation(m: Extract<Request, { type: "video-save" | "video-delete" }>, sender: chrome.runtime.MessageSender) {
+  if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
+  const lib = await library();
+  if (m.type === "video-delete") {
+    const entry = lib.entries[m.pageId];
+    const old = entry?.page.videoMarks?.find(mark => mark.id === m.id);
+    if (!entry || !old || old.updatedAt !== m.expectedUpdatedAt || JSON.stringify(old) !== m.expectedMark)
+      throw Error("视频标注已改变，请刷新后重试。");
+    let backup: Blob | null = null, files: DirectoryFiles | null = null;
+    if (old.imagePath) {
+      files = await videoRoot("readwrite");
+      backup = await files.readBlob(old.imagePath);
+      if (backup) await files.remove(old.imagePath);
+    }
+    try {
+      entry.page.videoMarks = entry.page.videoMarks!.filter(mark => mark.id !== old.id);
+      entry.page.updatedAt = new Date().toISOString();
+      entry.dirty = entry.mdDirty = true;
+      lib.status = "已暂存浏览器，正在写入文件";
+      await db.set("library", lib);
+    } catch (error) {
+      if (backup && files) await files.writeBlob(old.imagePath!, backup);
+      throw error;
+    }
+    scheduleSync(entry.page.id);
+    void notify().catch(() => {});
+    return lib;
+  }
+  const target = videoTarget(m.url);
+  if (!target || target.key !== m.videoKey ||
+      (!isLibraryUI(sender) && (sender.frameId !== 0 || videoTarget(sender.tab?.url ?? "")?.key !== m.videoKey)))
+    throw Error("当前视频已切换，请重新加载字幕后重试。");
+  const url = videoPageUrl(target);
+  const id = await pageId(url);
+  let entry = lib.entries[id];
+  if (entry?.issue) throw Error(entry.issue.message);
+  const now = new Date().toISOString();
+  const old = m.mark.id ? entry?.page.videoMarks?.find(mark => mark.id === m.mark.id) : undefined;
+  if (m.mark.id && (!old || old.updatedAt !== m.mark.expectedUpdatedAt || JSON.stringify(old) !== m.mark.expectedMark))
+    throw Error("视频标注已在其他窗口修改，当前内容尚未保存。");
+  if (old && old.kind !== m.mark.kind) throw Error("不能改变视频标注的类型。");
+  if (m.mark.kind === "screenshot" && !old && !m.captureRect)
+    throw Error("新截图缺少视频画面范围。");
+  if (m.mark.kind !== "screenshot" && m.captureRect)
+    throw Error("只有截图可以包含视频画面范围。");
+  const markId = old?.id ?? crypto.randomUUID();
+  const imagePath = old?.imagePath ?? (m.mark.kind === "screenshot" ? `media/${id}/${markId}.png` : undefined);
+  const time = old && now <= old.updatedAt ? new Date(Date.parse(old.updatedAt) + 1).toISOString() : now;
+  const mark = VideoMarkSchema.parse({ ...m.mark, id: markId, videoKey: target.key, imagePath,
+    createdAt: old?.createdAt ?? time, updatedAt: time });
+  let imageFiles: DirectoryFiles | null = null;
+  if (m.captureRect) {
+    imageFiles = await videoRoot("readwrite");
+    const image = await captureVideoImage(sender, m.captureRect);
+    try { await imageFiles.writeBlob(imagePath!, image); }
+    catch (error) {
+      await imageFiles.remove(imagePath!).catch(() => {});
+      throw error;
+    }
+  }
+  try {
+    if (!entry) {
+      const title = (m.title || new URL(url).hostname).slice(0, 1000);
+      const page: Page = { schemaVersion: 4, id, url, originalUrl: m.url, title,
+        favicon: /^https?:\/\//.test(m.favicon) ? m.favicon : "", folderName: folderName(title, id),
+        createdAt: time, updatedAt: time, annotations: [], videoMarks: [], tags: [], category: DEFAULT_CATEGORY,
+        categoryId: UNCATEGORIZED, tagIds: [] };
+      entry = lib.entries[id] = { page, baseJson: null, baseMd: null, dirty: true, mdDirty: true };
+    }
+    migrateTaxonomy(lib);
+    entry.page.schemaVersion = 4;
+    entry.page.videoMarks ??= [];
+    if (old) entry.page.videoMarks[entry.page.videoMarks.findIndex(item => item.id === old.id)] = mark;
+    else entry.page.videoMarks.push(mark);
+    entry.page.updatedAt = time;
+    entry.dirty = entry.mdDirty = true;
+    lib.lastColor = mark.color;
+    lib.status = "已暂存浏览器，正在写入文件";
+    await db.set("library", lib);
+  } catch (error) {
+    if (imageFiles) await imageFiles.remove(imagePath!).catch(() => {});
+    throw error;
+  }
+  scheduleSync(id);
+  void notify().catch(() => {});
+  return lib;
 }
 async function handle(m: Request, sender: chrome.runtime.MessageSender) {
   if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
@@ -372,6 +470,33 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
 }
 async function dispatch(m: Request | ImportRequest, sender: chrome.runtime.MessageSender) {
   if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
+  if (m.type === "page-delete") {
+    if (sender.url !== chrome.runtime.getURL("sidepanel.html"))
+      throw Error("请在当前页面侧栏中删除网页数据。");
+    if (!/^[a-f0-9]{16}$/.test(m.pageId)) throw Error("网页 ID 无效。");
+    return serialFiles(async () => {
+      await sync(new Set([m.pageId]));
+      const files = await videoRoot("readwrite");
+      const next = await serial(async () => {
+        const lib = await library();
+        const entry = lib.entries[m.pageId];
+        if (!entry || entry.page.updatedAt !== m.expectedUpdatedAt)
+          throw Error("网页数据已改变，请刷新侧栏后重试。");
+        await deletePageData(entry, files, async () => {
+          delete lib.entries[m.pageId];
+          await db.set("library", lib);
+        });
+        return lib;
+      });
+      await notify();
+      return next;
+    });
+  }
+  if (m.type === "video-save" || m.type === "video-delete")
+    return serialFiles(async () => {
+      if (isLibraryUI(sender)) await sync();
+      return serial(() => videoMutation(m, sender));
+    });
   if (m.type === "import-metadata") {
     if (!isLibraryUI(sender)) throw Error("请在侧边栏或仪表盘中导入元数据。");
     const files = validateImportBatch(m.files);
@@ -447,6 +572,19 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "video-transcript" || message?.type === "video-playback") {
     void (message.type === "video-playback" ? gdcPlaybackRequest(message, sender) : transcriptRequest(message, sender)).then(data => reply({ ok: true, data }),
       error => reply({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+  if (message?.type === "video-image") {
+    void (async () => {
+      if (sender.id !== chrome.runtime.id || typeof message.id !== "string") throw Error("请求无效。");
+      const lib = await library();
+      const mark = Object.values(lib.entries).flatMap(entry => entry.page.videoMarks ?? [])
+        .find(mark => mark.id === message.id && mark.kind === "screenshot");
+      if (!mark?.imagePath) throw Error("截图记录不存在。");
+      const image = await (await videoRoot("read")).readBlob(mark.imagePath);
+      if (!image) throw Error("本地截图文件已移走。");
+      return imagePreview(image);
+    })().then(data => reply({ ok: true, data }), error => reply({ ok: false, error: String(error) }));
     return true;
   }
   if (message?.type === "open-sidepanel") {

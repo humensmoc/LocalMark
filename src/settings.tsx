@@ -201,7 +201,7 @@ function Settings() {
           </div>
           <div>
             <strong>
-              {entries.reduce((n, e) => n + e.page.annotations.length, 0)}
+              {entries.reduce((n, e) => n + e.page.annotations.length + (e.page.videoMarks?.length ?? 0), 0)}
             </strong>
             <span>高亮摘录</span>
           </div>

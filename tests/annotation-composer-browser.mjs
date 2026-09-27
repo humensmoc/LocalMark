@@ -51,6 +51,7 @@ try {
   const state = async () => (await settings.evaluate(() => chrome.runtime.sendMessage({ type: "snapshot" }))).data;
   const marks = async () => Object.values((await state()).entries).find(e => e.page.url === url)?.page.annotations ?? [];
   const page = await context.newPage(); await page.goto(url);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(url).origin });
   await page.locator("#local-web-clipper-root").waitFor(); await reveal(page);
   const host = page.locator("#local-web-clipper-root"), editor = host.locator(".editor"), note = host.locator("#wc-note");
   const finish = async () => editor.evaluate(el => el.getAnimations().forEach(a => a.finish()));
@@ -65,13 +66,21 @@ try {
   const point = await select();
   assert.equal(await host.locator(".quick").count(), 0);
   assert.equal(await editor.locator(".swatch").count(), 3);
-  assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
+  assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), false);
+  assert.equal(await page.evaluate(() => getSelection()?.toString()), "Highlight this passage");
+  await page.keyboard.press("ControlOrMeta+C");
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "Highlight this passage");
   assert.equal((await note.boundingBox()).height, 36);
   const assertSaveOverlay = async () => {
     assert.equal(await editor.locator(".composer-help, .composer-excerpt").count(), 0);
     assert.equal(await editor.getByRole("button", { name: "取消", exact: true }).count(), 0);
-    const area = await note.boundingBox(), button = editor.getByRole("button", { name: "保存", exact: true });
-    const box = await button.boundingBox();
+    const button = editor.getByRole("button", { name: "保存", exact: true });
+    await until(async () => {
+      const a = await note.boundingBox(), b = await button.boundingBox();
+      const p = await note.evaluate(el => parseFloat(getComputedStyle(el).paddingRight));
+      return a && b && a.x + a.width - p <= b.x + 1;
+    });
+    const area = await note.boundingBox(), box = await button.boundingBox();
     assert.ok(box.x > area.x && box.y >= area.y && box.x + box.width < area.x + area.width && box.y + box.height < area.y + area.height);
     assert.ok(area.y + area.height - box.y - box.height <= 10, "save stays in the textarea bottom-right corner");
     assert.equal(await button.evaluate(el => { const r = el.getBoundingClientRect(); return el.getRootNode().elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest("button") === el; }), true);
@@ -82,7 +91,11 @@ try {
   const compact = await editor.boundingBox();
   assert.ok(Math.abs(compact.x - point.x - 8) < 2 && Math.abs(compact.y - point.y - 8) < 2);
   await page.screenshot({ path: join(out, "compact.png") });
-  ok("real text drag opens one compact two-row composer at the pointer with three colors and focused input");
+  ok("real text drag leaves the page selection available for Ctrl+C while showing the compact composer");
+  await page.keyboard.type("x");
+  assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
+  assert.equal(await note.inputValue(), "x");
+  await note.fill("");
   await page.keyboard.insertText("直接输入的批注");
   assert.ok((await note.boundingBox()).height >= 100);
   await page.keyboard.press("Shift+Enter"); await page.keyboard.insertText("第二行");
@@ -152,7 +165,9 @@ try {
   await page.evaluate(() => { const p = document.createElement("p"); p.id = "edge"; p.textContent = "Edge selection"; p.style.cssText = "position:fixed;right:3px;bottom:10px;white-space:nowrap"; document.body.append(p); });
   await select("#edge");
   await until(async () => await editor.locator(".swatch").count() === 8);
+  await note.click();
   await page.keyboard.insertText("窄屏也可以输入很长的批注。".repeat(15));
+  await until(async () => { const b = await editor.boundingBox(); return b.x >= 11 && b.y >= 11 && b.x + b.width <= 309 && b.y + b.height <= 439; });
   const edge = await editor.boundingBox();
   assert.ok(edge.x >= 11 && edge.y >= 11 && edge.x + edge.width <= 309 && edge.y + edge.height <= 439);
   assert.equal(await editor.evaluate(el => el.scrollWidth <= el.clientWidth), true);

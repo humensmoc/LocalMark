@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ElementAnchorSchema } from "./element-model";
+import { videoMarkLink } from "./video-marks";
 export type { ElementAnchor } from "./element-model";
 export const COLORS = {
   yellow: { name: "黄色", hex: "#ffe68b" },
@@ -68,9 +69,39 @@ export const MarkSchema = z
     updatedAt: timestamp,
   })
   ; // Display text can change without changing the original source anchor.
+const VideoCueRefSchema = z.object({
+  index: z.number().int().nonnegative(),
+  start: z.number().finite().nonnegative(),
+  end: z.number().finite().nonnegative(),
+  text: z.string().min(1).max(100000),
+});
+export const VideoMarkSchema = z.object({
+  id: z.string().uuid(),
+  kind: z.enum(["subtitle", "keyframe", "screenshot"]),
+  videoKey: z.string().min(1).max(500),
+  time: z.number().finite().nonnegative(),
+  trackId: z.string().max(2000).optional(),
+  from: VideoCueRefSchema.optional(),
+  to: VideoCueRefSchema.optional(),
+  text: z.string().min(1).max(100000),
+  note: z.string().max(100000),
+  color: ColorSchema,
+  imagePath: z.string().regex(/^media\/[a-f0-9]{16}\/[a-f0-9-]{36}\.png$/).optional(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+}).superRefine((mark, ctx) => {
+  if (mark.kind === "subtitle" && (!mark.trackId || !mark.from || !mark.to))
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "字幕标注缺少语言或句子定位" });
+  if (mark.kind === "screenshot" && !mark.imagePath)
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "截图缺少本地图片路径" });
+  if (mark.kind !== "screenshot" && mark.imagePath)
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "只有截图可以引用图片文件" });
+});
+export type VideoMark = z.infer<typeof VideoMarkSchema>;
+export type VideoCueRef = z.infer<typeof VideoCueRefSchema>;
 export const PageSchema = z
   .object({
-    schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     id: z.string().regex(/^[a-f0-9]{16}$/),
     url: z
       .string()
@@ -96,6 +127,7 @@ export const PageSchema = z
     createdAt: timestamp,
     updatedAt: timestamp,
     annotations: z.array(MarkSchema).max(10000),
+    videoMarks: z.array(VideoMarkSchema).max(10000).optional(),
     tags: PageTagsSchema.optional(),
     tagIds: z.array(z.string().min(1)).max(500).optional(),
     categoryId: z.string().min(1).optional(),
@@ -115,12 +147,14 @@ export const PageSchema = z
       .optional(),
   })
   .refine(p => p.schemaVersion === 1 || (!!p.categoryId && Array.isArray(p.tagIds) && new Set(p.tagIds).size === p.tagIds.length), "网页必须包含有效的分类 ID 和不重复的标签 ID")
-  .refine(p => p.schemaVersion === 3 || p.annotations.every(m => m.anchor.kind !== "element"), "元素标注需要 v3 元数据，请升级插件")
+  .refine(p => p.schemaVersion >= 3 || p.annotations.every(m => m.anchor.kind !== "element"), "元素标注需要 v3 元数据，请升级插件")
+  .refine(p => p.schemaVersion === 4 || !p.videoMarks?.length, "视频标注需要 v4 元数据，请升级插件")
   .refine(
     (p) =>
       new Set(p.annotations.map((a) => a.id)).size === p.annotations.length,
     "标注 ID 重复",
   )
+  .refine(p => new Set(p.videoMarks?.map(m => m.id)).size === (p.videoMarks?.length ?? 0), "视频标注 ID 重复")
   .transform((p) => ({
     ...p,
     tags: p.tags ?? [...new Set(p.annotations.flatMap((m) => m.tags))],
@@ -322,7 +356,12 @@ function frontmatterMarkdown(p: Page, legacyTextLinks: boolean) {
       return `${quote}\n\n${note ? note + "\n\n" : ""}[回到原文并高亮](<${textLink(p, m.anchor)}>)\n`;
     return `${quote}${note ? "\n\n" + note : ""}\n`;
   }).join("\n---\n\n");
-  return header + comment + excerpts;
+  const videos = (p.videoMarks ?? []).map(mark => {
+    const label = mark.kind === "subtitle" ? "字幕标注" : mark.kind === "screenshot" ? "截图" : "关键帧";
+    const relative = mark.imagePath ? (p.markdownFile ? mark.imagePath : `../${mark.imagePath}`) : "";
+    return `> ${md(mark.text)}\n\n${mark.note.trim() ? mark.note.split("\n").map(md).join("  \n") + "\n\n" : ""}${relative ? `![视频截图](<${relative}>)\n\n` : ""}${label} · ${Math.floor(mark.time / 60)}:${String(Math.floor(mark.time) % 60).padStart(2, "0")} · [跳转视频](<${videoMarkLink(p, mark).replace(/>/g, "%3E")}>)\n`;
+  }).join("\n---\n\n");
+  return header + comment + excerpts + (videos ? `${excerpts ? "\n---\n\n" : ""}${videos}` : "");
 }
 export function markdown(p: Page) {
   return frontmatterMarkdown(p, false);

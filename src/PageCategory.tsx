@@ -1,11 +1,12 @@
 import { useState } from "react";
 
-export function PageCategory({ category, categories, counts, change, browse }: {
+export function PageCategory({ category, categories, counts, change, browse, compact = false }: {
   category: string;
   categories: string[];
   counts: Map<string, number>;
   change: (category: string) => Promise<void>;
   browse: (category: string) => void;
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -27,10 +28,10 @@ export function PageCategory({ category, categories, counts, change, browse }: {
     }
   }
   return <section className="page-category" aria-label="网页主分类">
-    <div className="row spread">
+    {!compact && <div className="row spread">
       <label>主分类 · 单选</label>
       <button className="category-browse" onClick={() => browse(category)}>查看同类网页</button>
-    </div>
+    </div>}
     <button className="category-trigger" aria-label="选择主分类" aria-expanded={open} onClick={() => setOpen(!open)}>{category}</button>
     {open && <div className="tag-picker">
       <input autoFocus aria-label="搜索或新建主分类" placeholder="搜索分类，或输入新分类…" maxLength={100} value={query}

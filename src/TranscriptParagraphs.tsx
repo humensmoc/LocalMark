@@ -1,5 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { subtitleTime, type SubtitleCue } from "./video-transcript";
+import { colorInfo, type VideoMark } from "./model";
+import { markCueRange } from "./video-marks";
+import { Icon } from "./Icon";
+import { ScreenshotImage } from "./ScreenshotImage";
 import {
   transcriptParagraphs,
   transcriptSeparator,
@@ -17,23 +21,69 @@ export function TranscriptParagraphs({
   items,
   seconds,
   current,
+  marks,
+  trackId,
   onSeek,
+  onMarkerSeek,
+  onSelection,
+  onEdit,
 }: {
   items: TranscriptItem[];
   seconds: number;
   current: number;
+  marks: VideoMark[];
+  trackId: string;
   onSeek: (cue: SubtitleCue) => void;
+  onMarkerSeek: (seconds: number) => void;
+  onSelection: (first: TranscriptItem, last: TranscriptItem, x: number, y: number) => void;
+  onEdit: (mark: VideoMark, x: number, y: number) => void;
 }) {
   const groups = useMemo(
     () => transcriptParagraphs(items, seconds),
     [items, seconds],
   );
   const [hover, setHover] = useState<Hover | null>(null);
+  const [hoveredCommentId, setHoveredCommentId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ mark: VideoMark; x: number; y: number } | null>(null);
+  const cues = useMemo(() => {
+    const sorted = items.slice().sort((a, b) => a.index - b.index);
+    const result: SubtitleCue[] = [];
+    for (const item of sorted) result[item.index] = item.cue;
+    return result;
+  }, [items]);
+  const annotations = useMemo(() => {
+    const covering = new Map<number, VideoMark[]>(), ending = new Map<number, VideoMark[]>(), points = new Map<number, VideoMark[]>();
+    for (const mark of marks) {
+      const range = markCueRange(mark, cues, trackId);
+      if (!range) continue;
+      if (mark.kind === "subtitle") {
+        for (let index = range[0]; index <= range[1]; index++)
+          covering.set(index, [...(covering.get(index) ?? []), mark]);
+        ending.set(range[1], [...(ending.get(range[1]) ?? []), mark]);
+      } else {
+        covering.set(range[0], [...(covering.get(range[0]) ?? []), mark]);
+        points.set(range[0], [...(points.get(range[0]) ?? []), mark]);
+      }
+    }
+    return { covering, ending, points };
+  }, [marks, cues, trackId]);
   const popup = useRef<HTMLDivElement>(null),
-    timeButton = useRef<HTMLButtonElement>(null);
+    timeButton = useRef<HTMLButtonElement>(null),
+    cuesNode = useRef<HTMLDivElement>(null),
+    selecting = useRef(false),
+    finishSelection = useRef<((event: MouseEvent) => void) | null>(null);
   const hovered = useRef<Hover | null>(null),
     timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const keep = () => clearTimeout(timer.current);
+  const commentHoverProps = (mark: VideoMark) => ({
+    onMouseEnter: () => setHoveredCommentId(mark.id),
+    onMouseLeave: () => setHoveredCommentId(id => id === mark.id ? null : id),
+    onFocusCapture: () => setHoveredCommentId(mark.id),
+    onBlurCapture: (event: React.FocusEvent<HTMLElement>) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+        setHoveredCommentId(id => id === mark.id ? null : id);
+    },
+  });
   function hide() {
     keep();
     hovered.current = null;
@@ -43,6 +93,38 @@ export function TranscriptParagraphs({
     keep();
     timer.current = setTimeout(hide, 140);
   };
+  function selected(event: MouseEvent) {
+    const node = cuesNode.current;
+    if (event.button !== 0 || !node) return;
+    const root = node.getRootNode() as ShadowRoot & { getSelection?: () => Selection | null };
+    const selection = root.getSelection?.() ?? window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.toString().trim() || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (range.commonAncestorContainer.getRootNode() !== root) return;
+    const selectedItems = items.filter(item => {
+      const element = node.querySelector<HTMLElement>(`.cue[data-index="${item.index}"]`);
+      return element && range.intersectsNode(element.firstChild ?? element);
+    }).sort((a, b) => a.index - b.index);
+    if (!selectedItems.length) return;
+    hide();
+    onSelection(selectedItems[0], selectedItems[selectedItems.length - 1], event.clientX, event.clientY);
+  }
+  function startSelection(event: React.MouseEvent<HTMLDivElement>) {
+    if (event.button !== 0 || !(event.target as Element).closest(".cue")) return;
+    if (finishSelection.current) document.removeEventListener("mouseup", finishSelection.current);
+    selecting.current = true;
+    hide();
+    const finish = (up: MouseEvent) => {
+      selecting.current = false;
+      finishSelection.current = null;
+      selected(up);
+    };
+    finishSelection.current = finish;
+    document.addEventListener("mouseup", finish, { once: true });
+  }
+  function showPreview(mark: VideoMark, event: React.MouseEvent<HTMLElement>) {
+    if (mark.kind !== "screenshot") setPreview({ mark, x: event.clientX, y: event.clientY });
+  }
   function position() {
     if (!popup.current || !hovered.current) return;
     const bounds = popup.current.getBoundingClientRect(),
@@ -58,6 +140,7 @@ export function TranscriptParagraphs({
     x?: number,
     y?: number,
   ) {
+    if (selecting.current) return;
     keep();
     const container = element.closest(".body")?.getBoundingClientRect();
     const rects = [...element.getClientRects()].filter(
@@ -134,6 +217,7 @@ export function TranscriptParagraphs({
     document.addEventListener("keydown", escape);
     return () => {
       keep();
+      if (finishSelection.current) document.removeEventListener("mouseup", finishSelection.current);
       cancelAnimationFrame(frame);
       document.removeEventListener("scroll", moved, true);
       window.removeEventListener("resize", moved);
@@ -142,7 +226,7 @@ export function TranscriptParagraphs({
   }, []);
   return (
     <>
-      <div className="cues">
+      <div ref={cuesNode} className="cues" onMouseDownCapture={startSelection}>
         {groups.map((group) => (
           <div className="subtitle-paragraph" key={group.bucket}>
             <button
@@ -161,9 +245,11 @@ export function TranscriptParagraphs({
                       item.cue.text,
                     )}
                   <span
-                    className={`cue${current === item.index ? " active" : ""}${hover?.item === item ? " hovered" : ""}`}
+                    className={`cue${current === item.index ? " active" : ""}${hover?.item === item || annotations.covering.get(item.index)?.some(mark => mark.kind === "subtitle" && mark.id === hoveredCommentId) ? " hovered" : ""}${annotations.covering.has(item.index) ? " annotated" : ""}`}
+                    style={annotations.covering.has(item.index) ? { "--annotation": colorInfo(annotations.covering.get(item.index)!.at(-1)!.color).hex } as React.CSSProperties : undefined}
                     tabIndex={0}
                     data-start={item.cue.start}
+                    data-index={item.index}
                     onMouseEnter={(e) =>
                       show(item, e.currentTarget, e.clientX, e.clientY)
                     }
@@ -173,14 +259,17 @@ export function TranscriptParagraphs({
                     onMouseLeave={leave}
                     onFocus={(e) => show(item, e.currentTarget)}
                     onBlur={leave}
-                    onClick={(e) =>
-                      show(
+                    onClick={(e) => {
+                      if (window.getSelection()?.toString().trim()) return;
+                      const marked = annotations.covering.get(item.index)?.at(-1);
+                      if (marked && e.detail) onEdit(marked, e.clientX, e.clientY);
+                      else show(
                         item,
                         e.currentTarget,
                         e.detail ? e.clientX : undefined,
                         e.detail ? e.clientY : undefined,
-                      )
-                    }
+                      );
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
@@ -190,12 +279,50 @@ export function TranscriptParagraphs({
                   >
                     {item.cue.text}
                   </span>
+                  {((annotations.ending.get(item.index)?.length ?? 0) > 0 || (annotations.points.get(item.index)?.length ?? 0) > 0) && (
+                    <span className="cue-inserts">
+                      {annotations.ending.get(item.index)?.filter(mark => mark.note.trim()).map(mark => (
+                        <span key={mark.id} className="cue-note" data-mark-id={mark.id} style={{ "--annotation": colorInfo(mark.color).hex } as React.CSSProperties} {...commentHoverProps(mark)}>
+                          <button type="button" className="cue-note-jump" title={`跳转到 ${subtitleTime(mark.time)} 并暂停`} onClick={() => onMarkerSeek(mark.time)}>{mark.note}</button>
+                          <button type="button" className="cue-note-edit" onClick={e => onEdit(mark, e.clientX, e.clientY)} aria-label="编辑字幕批注"><Icon name="pen" size={13} /></button>
+                        </span>
+                      ))}
+                      {!!annotations.points.get(item.index)?.length && (
+                        <span className="cue-timeline" aria-label="字幕时间点">
+                          {annotations.points.get(item.index)!.slice().sort((a, b) => a.time - b.time).map(mark => {
+                            return <span key={mark.id} className={`cue-marker${hoveredCommentId === mark.id ? " comment-hovered" : ""}`} data-mark-id={mark.id}>
+                              <button type="button" aria-label={`${mark.kind === "screenshot" ? "截图" : "关键帧"} ${subtitleTime(mark.time)}，跳转视频`} onMouseEnter={e => showPreview(mark, e)} onMouseLeave={() => setPreview(null)} onClick={() => onMarkerSeek(mark.time)}>
+                                {mark.kind === "screenshot" ? <ScreenshotImage mark={mark} size="timeline" /> : <Icon name="bookmark" size={15} />}
+                              </button>
+                              <button type="button" className="marker-edit" aria-label="编辑时间点标注" onClick={e => onEdit(mark, e.clientX, e.clientY)}><Icon name="pen" size={12} /></button>
+                            </span>;
+                          })}
+                        </span>
+                      )}
+                      {annotations.points.get(item.index)?.filter(mark => mark.note.trim()).map(mark => (
+                        <span key={mark.id} className="cue-note point-note" data-mark-id={mark.id} style={{ "--annotation": colorInfo(mark.color).hex } as React.CSSProperties} {...commentHoverProps(mark)}
+                          onClick={event => {
+                            if ((event.target as Element).closest("button") || window.getSelection()?.toString().trim()) return;
+                            onMarkerSeek(mark.time);
+                          }}>
+                          <span className="cue-note-heading" aria-label={mark.kind === "screenshot" ? "截图" : "关键帧"}>
+                            {mark.kind === "screenshot" ? <ScreenshotImage mark={mark} size="comment" /> : <Icon name="bookmark" size={15} />}
+                            <strong>{subtitleTime(mark.time)}</strong>
+                          </span> <button type="button" className="cue-note-jump" title={`跳转到 ${subtitleTime(mark.time)} 并暂停`} onClick={() => onMarkerSeek(mark.time)}>{mark.note}</button>
+                        </span>
+                      ))}
+                    </span>
+                  )}
                 </Fragment>
               ))}
             </p>
           </div>
         ))}
       </div>
+      {preview && <div className="marker-preview" style={{ left: Math.max(8, Math.min(innerWidth - 220, preview.x + 10)), top: Math.max(8, Math.min(innerHeight - 70, preview.y + 12)) }} role="tooltip">
+        <strong>关键帧 {subtitleTime(preview.mark.time)}</strong>
+        {preview.mark.note && <p>{preview.mark.note}</p>}
+      </div>}
       {hover && (
         <div
           ref={popup}

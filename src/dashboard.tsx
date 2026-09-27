@@ -26,7 +26,7 @@ import { useDashboardLayout } from "./DashboardLayout";
 import { TaxonomyManager } from "./TaxonomyManager";
 import { BulkToolbar } from "./BulkToolbar";
 import { taxonomyToken } from "./taxonomy";
-import { LIBRARY_VIEWS, LibraryNavigation, CatalogGrid, CatalogDetail, ContentCollection, catalogItems, changedDescription, matchesContent, type LibraryView, type CatalogKind, type DescriptionDraft } from "./LibraryViews";
+import { LIBRARY_VIEWS, LibraryNavigation, CatalogGrid, CatalogDetail, ContentCollection, HighlightCard, catalogItems, changedDescription, matchesContent, type LibraryView, type CatalogKind, type DescriptionDraft } from "./LibraryViews";
 import "./ui.css";
 import "./dashboard.css";
 
@@ -165,6 +165,7 @@ function Dashboard() {
       p.comment ?? "",
       ...p.tags,
       ...p.annotations.flatMap((m) => [m.text, m.note]),
+      ...(p.videoMarks ?? []).flatMap((m) => [m.text, m.note]),
     ]
       .join("\n")
       .toLocaleLowerCase()
@@ -177,7 +178,7 @@ function Dashboard() {
   const catalogKind = (["categories", "tags", "colors"].includes(view) ? view : null) as CatalogKind | null;
   const catalogItem = catalogKind ? catalogItems(lib, catalogKind).find(x => x.id === catalogId) : undefined;
   const aggregate = view === "highlights";
-  const contentPages = pages.filter(p => p.annotations.length > 0);
+  const contentPages = pages.filter(p => p.annotations.length > 0 || !!p.videoMarks?.length);
   const viewInfo = LIBRARY_VIEWS.find(x => x.id === view)!;
   function changeView(next: LibraryView) { setView(next); setQuery(""); setCatalogId(""); setCheckedIds([]); setMultiSelect(false); }
   function openSource(p: Page) { setView("pages"); setQuery(""); setFilter({ category: "", tags: [] }); setSelectedId(p.id); }
@@ -284,7 +285,7 @@ function Dashboard() {
             : <div className="aggregate-content">
               <TagFilters pages={contentPages} categories={categories} tags={tags} filter={contentFilter}
                 change={setContentFilter} taxonomy={lib.taxonomy}
-                matches={p => p.annotations.some(mark => matchesContent(p, mark, query))}
+                matches={p => [...p.annotations, ...(p.videoMarks ?? [])].some(mark => matchesContent(p, mark, query))}
                 title="筛选高亮" storageKey="localmark.filters.dashboard.highlights" />
               <ContentCollection key={`${query}:${JSON.stringify(contentFilter)}`}
                 pages={contentPages.filter(p => matchesTagFilter(p, contentFilter, lib.taxonomy))} query={query} open={openSource}
@@ -436,9 +437,9 @@ function Dashboard() {
                 />
                 <div className="detail-section-heading">
                   <h3>高亮与批注</h3>
-                  <small>{page.annotations.length} 条摘录</small>
+                  <small>{page.annotations.length + (page.videoMarks?.length ?? 0)} 条标注</small>
                 </div>
-                {!page.annotations.length && (
+                {!page.annotations.length && !page.videoMarks?.length && (
                   <p className="detail-no-marks">
                     暂无高亮。需要新增摘录时，打开原网页选择文字。
                   </p>
@@ -487,6 +488,8 @@ function Dashboard() {
                       />
                     );
                   })}
+                {page.videoMarks?.slice().sort((a, b) => a.time - b.time).map(mark =>
+                  <HighlightCard key={`${page.id}:${mark.id}`} page={page} mark={mark} open={openSource} showSource={false} />)}
               </fieldset>
             </>
           )}

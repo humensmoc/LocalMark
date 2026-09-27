@@ -44,7 +44,8 @@ body {
   font-size: 12px;
 }
 .page-metadata-location .metadata-copy,
-.page-metadata-location .metadata-download {
+.page-metadata-location .metadata-download,
+.page-metadata-location .metadata-delete {
   padding: 5px 2px;
   font-size: 11px;
 }
@@ -56,8 +57,14 @@ body {
   margin-top: 5px;
   overflow-wrap: anywhere;
 }
-.page-metadata-location .metadata-filename {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.comment-actions-compact {
+  justify-content: flex-end;
 }
+.video-card-image-jump,
+.video-card-note-jump { cursor: pointer; }
+.video-point-card { cursor: pointer; }
+.video-card-image-jump:focus-visible,
+.video-card-note-jump:focus-visible { outline: 2px solid #82c9ff; outline-offset: 2px; border-radius: 4px; }
+.video-card-kind-jump { display: block; width: fit-content; padding: 0; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.video-card-kind-jump:hover,
+.video-card-note-jump:hover { text-decoration: underline; }

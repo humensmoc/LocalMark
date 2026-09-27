@@ -309,7 +309,13 @@ try {
     "LocalMark Native QA /first",
   );
   await panel.screenshot("native-sidepanel.png");
+  assert.equal(await panel.evaluate(() => document.querySelector(".page-category > .row")), null);
+  assert.equal(await panel.evaluate(() => document.querySelector(".page-tags > .section-title")), null);
+  assert.equal(await panel.evaluate(() => document.querySelector(".page-comment > label")), null);
+  assert.equal(await panel.evaluate(() => document.querySelector(".page-comment small")), null);
+  assert.equal(await panel.evaluate(() => document.querySelector("#wc-page-comment")?.getAttribute("aria-label")), "网页评论");
   assert.equal(await panel.evaluate(() => document.querySelector(".metadata-open")?.disabled), true);
+  assert.equal(await panel.evaluate(() => document.querySelector(".metadata-copy")?.disabled), true);
   assert.match(await panel.evaluate(() => document.querySelector(".page-metadata-location").textContent), /保存评分、标签或评论/);
   await until(() => panel.evaluate(() => [...document.querySelectorAll(".page-head .site-icon img, .page-head .site-backdrop img")].length === 2 && [...document.querySelectorAll(".page-head img")].every(img => img.complete && img.naturalWidth > 0)), "current page icon and backdrop loaded");
   ok("current page shows its site icon and frosted backdrop");
@@ -548,8 +554,9 @@ try {
   await page.mouse.up();
   assert.equal(
     await note.evaluate(el => el.getRootNode().activeElement === el),
-    true,
+    false,
   );
+  assert.equal(await page.evaluate(() => getSelection()?.toString()), "Highlight this passage");
   await finishMotion(editor);
   const compactBefore = await editor.boundingBox();
   assert.equal(await editor.locator(".swatch").count(), 3);
@@ -602,7 +609,7 @@ try {
   assert.equal(await editor.evaluate(el => el.inert && getComputedStyle(el).pointerEvents === "none"), true);
   await finishMotion(editor);
   await editor.waitFor({ state: "detached" });
-  ok("the composer focuses the note without scrolling; typing, color save and animated exit work");
+  ok("the composer preserves text selection until note input, while typing, color save and animated exit work");
 
   // Both original text and the margin rail expose the same animated preview.
   await page.locator("#first b").hover();
@@ -838,11 +845,13 @@ try {
   await selectBottom();
   await note.click();
   await note.waitFor();
+  await page.keyboard.type("x");
+  await page.keyboard.press("Backspace");
   await page.keyboard.insertText("自动聚焦后回车保存");
   await page.keyboard.press("Enter");
   await until(async () => (await entry("/instant"))?.page.annotations.some(mark => mark.note === "自动聚焦后回车保存"), "Enter saves immediately typed note");
   await editor.waitFor({ state: "detached" });
-  ok("Enter saves a note typed after selection without ever clicking the comment input");
+  ok("Enter saves a note typed after selection");
   // Restricted pages must not retain the previous article as an editable current page.
   await second.goto("chrome://version");
   await second.bringToFront();
@@ -930,6 +939,13 @@ try {
     navigator.clipboard.writeText = async value => { window.__metadataCopied = value; };
   });
   await until(() => panel.evaluate(() => document.querySelector(".metadata-open")?.disabled === false), "metadata file synced");
+  assert.equal(await panel.evaluate(() => document.querySelector(".metadata-copy")?.disabled), false);
+  await panel.evaluate(() => {
+    window.__metadataCopyButton = document.querySelector(".metadata-copy");
+    window.__metadataCopyDisabledTransitions = [];
+    window.__metadataCopyObserver = new MutationObserver(() => window.__metadataCopyDisabledTransitions.push(window.__metadataCopyButton.disabled));
+    window.__metadataCopyObserver.observe(window.__metadataCopyButton, { attributes: true, attributeFilter: ["disabled"] });
+  });
   const metadataPath = new URL(page.url()).pathname;
   const metadataEntry = await entry(metadataPath);
   assert.ok(metadataEntry);
@@ -965,6 +981,8 @@ try {
   }, metadataEntry.page.id);
   assert.deepEqual(migratedNames, [`${metadataEntry.page.title}--${metadataEntry.page.id}.json`]);
   await until(() => panel.evaluate(() => !document.querySelector(".metadata-open").disabled), "metadata migration refresh");
+  assert.equal(await panel.evaluate(() => document.querySelector(".metadata-copy") === window.__metadataCopyButton), true);
+  assert.deepEqual(await panel.evaluate(() => { window.__metadataCopyObserver.disconnect(); return window.__metadataCopyDisabledTransitions; }), []);
   ok("old ID-only JSON migrates to a readable title filename with identical bytes in real OPFS");
   await panel.click(".metadata-open");
   await until(() => panel.evaluate(() => window.__metadataCalls.length === 1 && !document.querySelector(".metadata-open").disabled), "metadata picker cancelled");
@@ -976,7 +994,16 @@ try {
   assert.equal(await panel.evaluate(() => document.querySelector(".page-metadata-location [role=status]")?.textContent ?? ""), "");
   await panel.click(".metadata-copy");
   assert.equal(await panel.evaluate(() => window.__metadataCopied), pickerCall.name);
-  assert.equal(await panel.evaluate(() => document.querySelector(".metadata-filename").textContent), pickerCall.name);
+  assert.equal(await panel.evaluate(() => document.querySelector(".metadata-filename")), null);
+  assert.deepEqual(await panel.evaluate(() => ({
+    open: document.querySelector(".metadata-open")?.textContent.trim(),
+    download: document.querySelector(".metadata-download")?.textContent.trim(),
+    copy: document.querySelector(".metadata-copy")?.textContent.trim(),
+    deleteLabel: document.querySelector(".metadata-delete")?.getAttribute("aria-label"),
+  })), { open: "", download: "", copy: "复制文件名", deleteLabel: "删除当前网页全部标注和文件" });
+  await panel.evaluate(() => { window.__deleteConfirmOriginal = window.confirm; window.confirm = () => false; });
+  await panel.click(".metadata-delete");
+  await panel.evaluate(() => { window.confirm = window.__deleteConfirmOriginal; });
   assert.deepEqual((await entry(metadataPath)).page, metadataEntry.page);
   await downloadCurrentMetadata(metadataEntry.page);
   ok("downloaded JSON matches the active article stored in its month/day directory");
@@ -1149,6 +1176,29 @@ try {
   assert.ok(Math.abs(edgeAfterScroll.y + edgeAfterScroll.height / 2 - await page.evaluate(() => innerHeight / 2)) <= 1);
   await page.evaluate(() => scrollTo(0, 0));
   ok("page tools and element editing work with the native sidebar closed; reopening and tab switching keep tools available and centered after scroll");
+  await page.goto(base + metadataPath);
+  await page.bringToFront();
+  await until(() => panel.evaluate(() => document.querySelector(".metadata-delete")?.disabled === false), "page deletion control");
+  await panel.evaluate(() => { window.confirm = message => { window.__deletePrompt = message; return true; }; });
+  await panel.click(".metadata-delete");
+  await until(async () => !(await entry(metadataPath)), "deleted page absent from browser library");
+  const afterDeleteRefresh = await rpc({ type: "snapshot", refresh: true });
+  assert.equal(afterDeleteRefresh.ok, true);
+  assert.equal(afterDeleteRefresh.data.entries[metadataEntry.page.id], undefined);
+  const deletedJson = await panel.evaluate(async id => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("LocalMark QA");
+    async function contains(dir) {
+      for await (const [name, handle] of dir.entries()) {
+        if (handle.kind === "directory" && await contains(handle)) return true;
+        if (handle.kind === "file" && name.endsWith(`--${id}.json`)) return true;
+      }
+      return false;
+    }
+    return contains(root);
+  }, metadataEntry.page.id);
+  assert.equal(deletedJson, false);
+  assert.match(await panel.evaluate(() => window.__deletePrompt), /对应的 JSON/);
+  ok("current-page delete button removes the browser entry and its named JSON after confirmation");
   if (process.env.LOCALMARK_INTERACTIVE_QA === "1") {
     await panel.detach();
     await toggle(page);

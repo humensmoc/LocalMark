@@ -11,7 +11,11 @@ import {
   type Library,
   type Mark,
   type Page,
+  type VideoMark,
 } from "./model";
+import { videoTarget, subtitleTime } from "./video-transcript";
+import { videoMarkLink, videoPageUrl } from "./video-marks";
+import { ScreenshotGallery } from "./ScreenshotImage";
 import { request } from "./protocol";
 import { Icon } from "./Icon";
 import { TagBrowser, type TagFilter } from "./TagBrowser";
@@ -44,7 +48,8 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
     [commentDrafts, setCommentDrafts] = useState(initial.comments),
     [titleDrafts, setTitleDrafts] = useState(initial.titles),
     [toast, setToast] = useState("");
-  const url = page?.url ?? "";
+  const rawUrl = page?.url ?? "";
+  const url = rawUrl && videoTarget(rawUrl) ? videoPageUrl(videoTarget(rawUrl)!) : rawUrl;
   useEffect(() => {
     if (!lib.taxonomy) return;
     setFilter(old => {
@@ -56,6 +61,9 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
   const current = Object.values(lib.entries).find(
     (e) => e.page.url === url,
   )?.page;
+  const legacyCurrent = rawUrl !== url
+    ? Object.values(lib.entries).find((e) => e.page.url === rawUrl)?.page
+    : undefined;
   const activeTab = useRef<number | undefined>(undefined),
     generation = useRef(0),
     loadGeneration = useRef(0);
@@ -198,11 +206,11 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
     if (!id || !page) return;
     try {
       const [target] = await chrome.tabs.query({ active: true, windowId });
-      if (target?.id !== id || canonicalUrl(target.url ?? "") !== url)
+      if (target?.id !== id || canonicalUrl(target.url ?? "") !== rawUrl)
         throw Error("页面已切换，请稍后重试。");
       const reply = await chrome.tabs.sendMessage(
         id,
-        { type: "page-action", action, id: m?.id, url },
+        { type: "page-action", action, id: m?.id, url: rawUrl },
         { frameId: 0 },
       );
       if (!reply?.ok) throw Error(reply?.error ?? "网页未连接，请刷新网页。");
@@ -224,6 +232,27 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
     } catch (e) {
       tell(String(e));
     }
+  }
+  async function videoAction(p: Page, m: VideoMark, action: "jump" | "edit") {
+    try {
+      const [target] = await chrome.tabs.query({ active: true, windowId });
+      if (target?.id && videoTarget(target.url ?? "")?.key === m.videoKey) {
+        const response = await chrome.tabs.sendMessage(target.id, { type: "video-mark-action", action, id: m.id, key: m.videoKey }, { frameId: 0 });
+        if (!response?.ok) throw Error(response?.error || "视频标注窗口尚未就绪。");
+      } else await request({ type: "open", url: videoMarkLink(p, m) });
+    } catch (error) { tell(String(error)); }
+  }
+  function videoJumpKey(event: React.KeyboardEvent<HTMLElement>, p: Page, m: VideoMark) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    void videoAction(p, m, "jump");
+  }
+  async function removeVideo(p: Page, m: VideoMark) {
+    try {
+      const next = await request({ type: "video-delete", pageId: p.id, id: m.id,
+        expectedUpdatedAt: m.updatedAt, expectedMark: JSON.stringify(m) });
+      setLib(next); tell("已删除视频标注；" + next.status);
+    } catch (error) { tell(String(error)); }
   }
   async function copy(p: Page, m: Mark) {
     const text = textLink(p, m.anchor);
@@ -247,7 +276,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
   }
 
   function jump(p: Page, m: Mark) {
-    if (p.url === url) void pageAction("jump", m);
+    if (p.url === url || p.url === rawUrl) void pageAction("jump", m);
     else
       void request({ type: "open", url: textLink(p, m.anchor) }).catch((e) =>
         tell(String(e)),
@@ -266,7 +295,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
       ...p.tags,
       ...(m
         ? [m.text, m.note]
-        : p.annotations.flatMap((a) => [a.text, a.note])),
+        : [...p.annotations.flatMap((a) => [a.text, a.note]), ...(p.videoMarks ?? []).flatMap(mark => [mark.text, mark.note])]),
     ]
       .join(" ")
       .toLocaleLowerCase()
@@ -278,7 +307,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
       style={{ "--mark": colorInfo(m.color).hex } as React.CSSProperties}
     >
       {m.anchor.kind === "element" && <small className="element-kind">元素 · {m.anchor.tag}</small>}
-      {p.url !== url && (
+      {p.url !== url && p.url !== rawUrl && (
         <button className="title muted" onClick={() => jump(p, m)}>
           {p.title}
         </button>
@@ -292,10 +321,10 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
           if (e.key === "Enter") jump(p, m);
         }}
       >
-        {p.url === url ? page?.excerpts?.[m.id] ?? m.text : m.text}
+        {p.url === url || p.url === rawUrl ? page?.excerpts?.[m.id] ?? m.text : m.text}
       </div>
       {m.note && <div className="note">{m.note}</div>}
-      {p.url === url && page?.approximate?.includes(m.id) && (
+      {(p.url === url || p.url === rawUrl) && page?.approximate?.includes(m.id) && (
         <div className="hint">已定位到对应段落 · 虚线标记</div>
       )}
       <div className="row tools wrap">
@@ -303,7 +332,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
           <Icon name="link" size={14} />
           链接
         </button>
-        {p.url === url && (
+        {(p.url === url || p.url === rawUrl) && (
           <>
             <button onClick={() => void pageAction("edit", m)}>
               <Icon name="pen" size={14} />
@@ -324,6 +353,33 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
         <button title="删除标注" onClick={() => void remove(p, m)}>
           <Icon name="trash" size={14} />
         </button>
+      </div>
+    </article>
+  );
+  const videoCard = (p: Page, m: VideoMark) => (
+    <article key={m.id} className={`card current${m.kind === "subtitle" ? "" : " video-point-card"}`} data-video-mark-id={m.id}
+      style={{ "--mark": colorInfo(m.color).hex } as React.CSSProperties}
+      onClick={event => {
+        if (m.kind === "subtitle" || (event.target as Element).closest("button,a,input,textarea,select,[role='button']") || window.getSelection()?.toString().trim()) return;
+        void videoAction(p, m, "jump");
+      }}>
+      {m.kind === "screenshot" && <div className="video-card-image-jump" role="button" tabIndex={0}
+        aria-label={`跳转到截图 ${subtitleTime(m.time)}`} onClick={() => void videoAction(p, m, "jump")}
+        onKeyDown={event => videoJumpKey(event, p, m)}><ScreenshotGallery marks={[m]} allowPreview={false} /></div>}
+      <button type="button" className="element-kind video-card-kind-jump" onClick={() => void videoAction(p, m, "jump")}
+        title={`跳转到${m.kind === "subtitle" ? "字幕" : m.kind === "screenshot" ? "截图" : "关键帧"} ${subtitleTime(m.time)}`}>
+        {m.kind === "subtitle" ? "字幕标注" : m.kind === "screenshot" ? "截图" : "关键帧"} · {subtitleTime(m.time)}
+      </button>
+      {p.url !== url && <button className="title muted" onClick={() => void videoAction(p, m, "jump")}>{p.title}</button>}
+      {m.kind !== "screenshot" && <div className="quote" tabIndex={0} role="button" onClick={() => void videoAction(p, m, "jump")}
+        onKeyDown={event => videoJumpKey(event, p, m)}>{m.text}</div>
+      }
+      {m.note && <div className="note video-card-note-jump" tabIndex={0} role="button"
+        onClick={() => void videoAction(p, m, "jump")} onKeyDown={event => videoJumpKey(event, p, m)}>{m.note}</div>}
+      <div className="row tools wrap">
+        <button title="复制视频时间链接" onClick={() => void navigator.clipboard.writeText(videoMarkLink(p, m)).then(() => tell("已复制视频时间链接"), error => tell(String(error)))}><Icon name="link" size={14} />链接</button>
+        {p.url === url && <button onClick={() => void videoAction(p, m, "edit")}><Icon name="pen" size={14} />编辑</button>}
+        <button title="删除视频标注" onClick={() => void removeVideo(p, m)}><Icon name="trash" size={14} /></button>
       </div>
     </article>
   );
@@ -457,7 +513,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                   }}
                 />
                 <div className="url">{url}</div>
-                <PageMetadataLocation key={`metadata:${url}`} pageId={current?.id} library={lib} tell={tell} />
+                <PageMetadataLocation key={`metadata:${url}`} pageId={current?.id} library={lib} tell={tell} onDeleted={setLib} />
                 <PageRating
                   key={`rating:${url}`}
                   rating={current?.rating}
@@ -470,6 +526,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                   }}
                 />
                 <PageCategory
+                  compact
                   key={`category:${url}`}
                   category={current?.category ?? DEFAULT_CATEGORY}
                   categories={allCategories}
@@ -495,6 +552,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                   }}
                 />
                 <PageTags
+                  compact
                   key={url}
                   tags={current?.tags ?? []}
                   allTags={allTags}
@@ -520,6 +578,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                   }}
                 />
                 <PageComment
+                  compact
                   key={`comment:${url}`}
                   comment={current?.comment ?? ""}
                   draft={commentDrafts[url]}
@@ -562,7 +621,12 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                 })
                 .filter((m) => matches(current, m))
                 .map((m) => card(current, m))}
-              {!current?.annotations.length && (
+              {legacyCurrent?.annotations
+                .filter((m) => matches(legacyCurrent, m))
+                .map((m) => card(legacyCurrent, m))}
+              {current?.videoMarks?.filter(mark => matches(current, undefined) || [mark.text, mark.note].join(" ").toLocaleLowerCase().includes(query))
+                .slice().sort((a, b) => a.time - b.time).map(mark => videoCard(current, mark))}
+              {!current?.annotations.length && !current?.videoMarks?.length && !legacyCurrent?.annotations.length && (
                 <div className="empty">
                   <Icon name="pen" size={30} />
                   <p>可以只给网页评分、添加标签或评论。</p>

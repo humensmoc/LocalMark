@@ -1,6 +1,7 @@
 import { colorInfo } from "./model";
 import { useState, type CSSProperties } from "react";
-import { COLORS, type Color, type Library, type Page, type Mark } from "./model";
+import { COLORS, type Color, type Library, type Page, type Mark, type VideoMark } from "./model";
+import { ScreenshotGallery } from "./ScreenshotImage";
 import { Icon } from "./Icon";
 import { SiteIcon } from "./SiteIcon";
 import { RatingDots } from "./PageRating";
@@ -26,10 +27,10 @@ export const changedDescription = (d: DescriptionDraft) => d.value !== d.base ||
 
 export function catalogItems(lib: Library, kind: CatalogKind): CatalogItem[] {
   const pages = Object.values(lib.entries).map(e => e.page);
-  if (kind === "colors") return ([...new Set<Color>([...Object.keys(COLORS) as Color[], ...pages.flatMap(page => page.annotations.map(mark => mark.color)), ...Object.keys(lib.taxonomy?.colorDescriptions ?? {}) as Color[]])]).map(color => ({
+  if (kind === "colors") return ([...new Set<Color>([...Object.keys(COLORS) as Color[], ...pages.flatMap(page => [...page.annotations, ...(page.videoMarks ?? [])].map(mark => mark.color)), ...Object.keys(lib.taxonomy?.colorDescriptions ?? {}) as Color[]])]).map(color => ({
     id: color, name: colorInfo(color).name, color,
     description: lib.taxonomy?.colorDescriptions?.[color] ?? "",
-    count: pages.reduce((n, p) => n + p.annotations.filter(m => m.color === color).length, 0),
+    count: pages.reduce((n, p) => n + [...p.annotations, ...(p.videoMarks ?? [])].filter(m => m.color === color).length, 0),
   }));
   return (lib.taxonomy?.[kind] ?? []).map(item => ({ ...item, description: item.description ?? "",
     count: pages.filter(p => kind === "categories" ? p.categoryId === item.id : p.tagIds?.includes(item.id)).length,
@@ -39,7 +40,7 @@ export function catalogItems(lib: Library, kind: CatalogKind): CatalogItem[] {
 export function LibraryNavigation({ view, lib, change }: { view: LibraryView; lib: Library; change: (view: LibraryView) => void }) {
   const pages = Object.values(lib.entries).map(e => e.page);
   const counts = { pages: pages.length, categories: lib.taxonomy?.categories.length ?? 0, tags: lib.taxonomy?.tags.length ?? 0,
-    highlights: pages.reduce((n, p) => n + p.annotations.length, 0), colors: catalogItems(lib, "colors").length };
+    highlights: pages.reduce((n, p) => n + p.annotations.length + (p.videoMarks?.length ?? 0), 0), colors: catalogItems(lib, "colors").length };
   return <nav className="library-navigation" aria-label="资料库视图">
     <small className="rail-label">资料库</small>
     {LIBRARY_VIEWS.map(item => <button key={item.id} aria-current={view === item.id ? "page" : undefined}
@@ -92,18 +93,20 @@ function ContentTags({ page }: { page: Page }) {
     {page.tags.map(tag => <span className="result-tag" key={tag}>{tag}</span>)}
   </div>;
 }
-export function HighlightCard({ page, mark, open, showSource = true }: { page: Page; mark: Mark; open: (p: Page) => void; showSource?: boolean }) {
+export function HighlightCard({ page, mark, open, showSource = true }: { page: Page; mark: Mark | VideoMark; open: (p: Page) => void; showSource?: boolean }) {
   return <article className="content-card" data-mark-id={mark.id} style={{ "--mark": colorInfo(mark.color).hex } as CSSProperties}>
+    {"kind" in mark && mark.kind === "screenshot" && <ScreenshotGallery marks={[mark]} />}
     <div className="content-card-body" tabIndex={0} role="region" aria-label="高亮和批注内容">
-      {mark.anchor.kind === "element" && <small className="element-kind">元素 · {mark.anchor.tag}</small>}
-      <blockquote>{mark.text}</blockquote>
+      {"kind" in mark ? <small className="element-kind">{mark.kind === "subtitle" ? "字幕" : mark.kind === "screenshot" ? "截图" : "关键帧"} · {Math.floor(mark.time / 60)}:{String(Math.floor(mark.time) % 60).padStart(2, "0")}</small>
+        : mark.anchor.kind === "element" && <small className="element-kind">元素 · {mark.anchor.tag}</small>}
+      {(!("kind" in mark) || mark.kind !== "screenshot") && <blockquote>{mark.text}</blockquote>}
       {mark.note.trim() && <div className="content-note"><p>{mark.note}</p></div>}
     </div>
     {showSource && <><ContentTags page={page} /><Source page={page} open={open} date={mark.updatedAt} /></>}
   </article>;
 }
 
-export function matchesContent(page: Page, mark: Mark, query: string) {
+export function matchesContent(page: Page, mark: Mark | VideoMark, query: string) {
   return [page.title, page.url, mark.text, mark.note, page.category, ...page.tags].join("\n").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
 }
 
@@ -111,14 +114,14 @@ export function ContentCollection({ pages, query, open, filtered = false }: { pa
   const [grouped, setGrouped] = useState(() => {
     try { return localStorage.getItem("localmark.content.grouped") !== "false"; } catch { return true; }
   });
-  const groups = pages.map(page => ({ page, marks: page.annotations
+  const groups = pages.map(page => ({ page, marks: [...page.annotations, ...(page.videoMarks ?? [])]
     .filter(mark => matchesContent(page, mark, query))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) }))
     .filter(group => group.marks.length)
     .sort((a, b) => b.marks[0].updatedAt.localeCompare(a.marks[0].updatedAt));
   const count = groups.reduce((sum, group) => sum + group.marks.length, 0);
   return <div className="library-collection content-collection">
-    <div className="collection-heading"><span>{count} 条高亮 · {groups.length} 个网页</span><div className="content-view-controls">
+    <div className="collection-heading"><span>{count} 条{pages.some(page => page.videoMarks?.length) ? "标注" : "高亮"} · {groups.length} 个网页</span><div className="content-view-controls">
       <button type="button" className="group-mode-switch" role="switch" aria-checked={grouped} aria-label="按网页分组" onClick={() => {
         const next = !grouped; setGrouped(next);
         try { localStorage.setItem("localmark.content.grouped", String(next)); } catch {}
@@ -143,7 +146,7 @@ export function CatalogDetail({ lib, kind, item, draft, change, reset, mutate, o
   const changed = changedDescription(d);
   const nameChanged = d.name !== undefined && d.name !== item.name;
   const stale = !!draft && draft.expected !== taxonomyToken(lib);
-  const pages = Object.values(lib.entries).map(e => e.page).filter(p => kind === "colors" ? p.annotations.some(m => m.color === item.id)
+  const pages = Object.values(lib.entries).map(e => e.page).filter(p => kind === "colors" ? [...p.annotations, ...(p.videoMarks ?? [])].some(m => m.color === item.id)
     : kind === "categories" ? p.categoryId === item.id : p.tagIds?.includes(item.id)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return <div className="catalog-detail">
     <small className="rail-label">{kind === "categories" ? "主分类" : kind === "tags" ? "子标签" : "颜色"}详情</small>
@@ -172,7 +175,7 @@ export function CatalogDetail({ lib, kind, item, draft, change, reset, mutate, o
     </form>
     {kind !== "colors" && item.id !== UNCATEGORIZED && <button className="catalog-manage" onClick={manage}>合并或删除</button>}
     <div className="collection-heading"><h3>{kind === "colors" ? "关联高亮" : "关联网页"}</h3>{kind !== "colors" && <button onClick={browse}>筛选网页</button>}</div>
-    <div className="catalog-related">{kind === "colors" ? pages.flatMap(page => page.annotations.filter(m => m.color === item.id).map(mark => <HighlightCard key={`${page.id}:${mark.id}`} page={page} mark={mark} open={open} />))
+    <div className="catalog-related">{kind === "colors" ? pages.flatMap(page => [...page.annotations, ...(page.videoMarks ?? [])].filter(m => m.color === item.id).map(mark => <HighlightCard key={`${page.id}:${mark.id}`} page={page} mark={mark} open={open} />))
       : pages.map(page => <PageCard key={page.id} page={page} open={open} />)}
       {!pages.length && <p className="muted">暂时没有关联内容，可以先记录说明。</p>}</div>
   </div>;
