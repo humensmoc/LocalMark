@@ -1,5 +1,82 @@
 # 验证记录
 
+## 0.3.6 顶部删除与展开后保存（2026-09-27）
+
+- `npm run build`含TypeScript通过；package、lock顶层/根包、public/dist manifest及三个入口构建版本0.3.6。`git diff --check`通过，未提交Git。
+- `node tests/annotation-composer-browser.mjs`最终7组通过，results.json版本0.3.6、errors=[]。新选择和空批注旧高亮紧凑态没有保存按钮；点击/输入展开后保存仍在textarea内右下角，可命中且不遮文字。已有高亮删除在header内、无footer，320px下实际点击删除后仅目标标注消失，其他批注保留。
+- 原真实划词、聚焦、输入法、换行保存、拖动、旧高亮改色不重复、1/8色配置与持久化、颜色资料页检查通过。已查看compact.png、existing-top-delete.png、existing-compact-320.png：按钮同排，紧凑/展开和窄屏无新增浮窗横向溢出。截图与报告位于test-results/annotation-composer/。
+- 首次测试误在构建结束前加载扩展失败；等待构建成功后再测试。新增320px步骤点击段落中心落到换行空白，等待编辑窗超时；改为读取真实文本首行坐标点击后整套通过，未据此改产品逻辑。未重跑单元、完整侧栏、字幕或译文套件；继承字幕跨行修正，其浏览器证据仍见0.3.5。用户实际页面版本待重载扩展和刷新后确认。
+
+## 0.3.5 框内保存、精简浮窗与字幕跨行定位（2026-09-27）
+
+- 最终`npm run build`含类型检查、`git diff --check`通过；五处版本及三个页面脚本内嵌版本0.3.5。起始构建0.3.4，演进记录当时0.3.3，从实际版本递增，保留同期修改。
+- `node tests/annotation-composer-browser.mjs`最终dist6组通过、errors=[]。补充紧凑/展开/320px断言：无快捷键提示、摘录或取消；保存按钮四边均在textarea内、距底部不超过10px、实际命中可点，文字右边界不进入按钮区域。实际点击框内保存持久化多行批注；聚焦、拖动、旧高亮编辑、自选色数量与持久化等原检查通过。已查看compact.png、expanded-dragged.png和expanded-320.png，按钮不盖文字和关闭入口。
+- `node tests/translation-browser.mjs`在0.3.5通过，适配保存按钮和摘录展示移除，仍核对保存的中英原文/换行、定位切换、刷新和批注回写，无pageerror。现有原生侧栏/元素测试定位同步为保存/关闭，但本轮未运行完整45组侧栏、全量240项单元或实站。用户须重载扩展并刷新后确认版本0.3.5。
+
+
+### 同版字幕跨行定位补充
+
+- 收尾时另一任务因新增标注请求构建0.3.6，字幕文件未再修改。已核对0.3.6版本源/manifest/构建标记并保留本修正；下述字幕浏览器结果来自0.3.5，没有重新标为0.3.6复测。用户重载扩展并刷新后应确认最新v0.3.6。
+- 字幕任务先在0.3.4完成类型检查和构建，随后同期标注任务构建0.3.5包含该修正，最终五处版本和content构建标记核对0.3.5。功能只改TranscriptParagraphs的鼠标Y记录及可见行选择，未改播放器或字幕来源；未新增永久测试或重跑单元/实站。
+- 临时`check-cue-hover-line.mjs`将旧“始终第一行”断言改为鼠标所在行：跨行后的时间戳位移等于行距、按钮底部距目标行6px，同一行内横向居中跟随且纵向稳定。B站/YouTube宽屏、480和320px通过；三站原有颜色/播放/点击暂停、底部工具栏、搜索、键盘、语言、设置持久化、SSR/SPA/分P/iframe和错误恢复逐站通过。B站在两站脚本中先完成，YouTube等待当前句状态后单独脚本通过，GDC单独脚本通过；仅刻意模拟YouTube403有预期console，GDC errors=[]。
+- 初次并行运行时页面load及套件截止超时，同期dist正在重建，不能据此确认产品根因；使用最终产物逐站重跑完成。另一次YouTube颜色断言取值早于活跃句状态恢复，增加等待后通过。已查看`test-results/cue-hover-line/bilibili-320-wrapped.png`和`youtube-320-wrapped.png`，时间戳锚定当前悬停行，明暗/窄屏无新增溢出；保留前述其他任务验证记录。
+
+## 0.3.3 两行划词浮窗与自定义色板（2026-09-27）
+
+- 最终`npm run build`含类型检查通过，五处版本及三个页面脚本内嵌版本均0.3.3。本轮`npm test`22文件240项通过；新增2项验证自定义色JSON往返、非法CSS及重复色板拒绝、默认色板/上次颜色回退，原定位、同步、导入、分类测试通过。单元运行时版本为0.3.2，随后仅说明文案/版本构建更新；没有将旧测试标为重新运行。
+- 最终0.3.3 `node tests/annotation-composer-browser.mjs`：真实dist6组通过。实际鼠标划选在指针旁打开单一两行浮窗，无quick笔按钮；三色默认、自动聚焦、单行36px、点击/打字展开、输入法Enter不保存、Shift+Enter换行、Enter保存、拖动保持焦点/位置；旧高亮编辑并点颜色保存，不重复创建。真实设置改为单个#123456与8色，验证即时通知、刷新持久化、旧色保留、实际CSS Highlight绘制和仪表盘颜色视图。320×450右下角选字、长输入、颜色横向滚动在边界内，关闭按钮实际命中且不被工具遮挡；320px设置无横向溢出。报告`test-results/annotation-composer/results.json`，errors=[]。
+- 最终0.3.3 `npm run test:browser`：Chromium153.0.8010.12原生侧栏45组通过，报告`test-results/native-sidepanel-results.json`、errors=[]。旧笔按钮断言改为浮窗/颜色保存，拖动改为上排空白区；保留原生开关、版本、编辑/定位、轨道预览、元素嵌套、显隐、重新绑定、删除、SPA、同步、窄屏和导入导出。0.3.2中间产物一次并行运行在元素悬停检查超时，同版单独重跑及最终版均通过，未因此修改无关悬停逻辑。
+- `node tests/translation-browser.mjs`在0.3.2中间产物通过：选中色保存，输入展开后通过「查看摘录」核验换行；原文/双语切换、重插/改译/刷新、评论保存不重新绘制、窄屏与版本检查保持通过。其后本任务无译文或浮窗逻辑修改，未标为0.3.3重跑。
+- 已查看`annotation-composer/compact.png`、`expanded-dragged.png`、`expanded-320.png`、`settings-320.png`及`floating-editor-narrow.png`，修正初次320px工具盖住关闭按钮的层级。最终0.3.3保留同期0.3.2字幕底部布局；本轮没有重跑字幕实站或完整仪表盘套件。隔离合成网页验证不代表用户已登录网页实际版本，重载扩展并刷新后应显示0.3.3。
+
+
+## 0.3.2 纯背景高亮与底部工具栏（2026-09-27）
+
+- 同轮合并“去掉框和下划线”与“语言/搜索移到底部”两项要求，五处版本由0.3.1同步0.3.2，最终`npm run build`含TypeScript通过、`git diff --check`通过。此前仅纯背景的0.3.2是中间构建，最终复测覆盖底部布局；本轮未新增永久测试或重跑单元套件。
+- 临时`check-cue-background.mjs`检查播放、悬停、叠加三态背景均能区分，文字无box-shadow/下划线/键盘轮廓，保留句间距、真实播放高亮前进、鼠标横向跟随且纵向固定、浮层3秒定位暂停。三站宽屏/480/320px核对footer含全部工具，各控件中心同排、无溢出、展开输入至少40px；自动聚焦、无匹配过滤、Esc清空恢复、来源问号弹窗关闭、面板折叠后版本仍可见通过。
+- `node test-results/check-background-two-sites.mjs`与`check-background-gdc.mjs`接入原字幕回归，最终所有断言/报告通过：三站来源/语言、默认分段及设置即时更新和持久化、搜索/纯文本、键盘、真实媒体5秒暂停/GDC换iframe后10秒暂停、B站SSR、SPA/分P、错误重试。只有刻意模拟YouTube403的预期console，GDC errors=[]。本轮未访问用户登录页或实站字幕服务。
+- 已查看`test-results/cue-background/bilibili-both.png`、`bilibili-320-search.png`、`youtube-320-search.png`，高亮纯底色、顶部工具行移除、底部语言/搜索/问号/版本同排，明暗及窄屏无新增横向溢出。重载扩展并刷新视频页应显示v0.3.2。
+
+## 0.3.1 播放/悬停高亮及鼠标时间戳（2026-09-27）
+
+- `npm run build`含类型检查通过；package、lock顶层/根包、public/dist manifest同步0.3.1。`npx vitest run tests/transcript-layout.test.ts tests/transcript-loading.test.ts`既有17项通过，`git diff --check`通过。本轮没有新增永久单元测试或重跑全量238项。
+- 临时`test-results/check-cue-highlights.mjs`接入原两站/GDC浏览器回归的副本，运行`check-highlights-two-sites.mjs`和`check-highlights-gdc.mjs`，真实dist三站通过。检查播放句蓝底/下划线和另一句暖色悬停同时存在，同句兼具播放底色及悬停边框；播放前进后高亮更新、上一句悬停保留，句间CSS间距至少5px。时间戳中心跟随鼠标X，纵向不随鼠标在同句内部跨行移动，视口边缘不溢出，移到时间戳后仍可点击且真实媒体跳到3秒暂停。
+- 同时通过既有默认30秒分段/设置即时更新与持久化、语言、搜索、纯文本、键盘、5秒跳转及GDC换iframe后的10秒跳转、B站SSR、SPA/分P、错误恢复及900/480/320px。GDC初次新增检查等待精确的第7秒高亮超时，改为检查高亮随真实播放持续前进（起点大于等于7）后通过；属于测试采样条件调整，播放器代码未改。唯一console为刻意模拟YouTube403，GDC errors=[]。
+- 已查看`test-results/cue-highlights/bilibili-separate.png`、`bilibili-both.png`、`youtube-both.png`、`youtube-320.png`；浅色/深色高亮可区分且能叠加，段落句间距和换行可读，时间戳在首个可见文本行上方，窄屏无新增横向溢出。合成网站验证不等同于用户实站复测，重载扩展并刷新后应显示v0.3.1。
+
+## 0.3.0 字幕分段与悬停时间戳（2026-09-27）
+
+- 按用户指定由0.2.53升级0.3.0，package、lock顶层/根包、public/dist manifest一致，最终`npm run build`含TypeScript通过，页面脚本保持构建版本号。本轮初次构建后`npm test`22文件238项通过；后续悬停/滚动修正后的最终构建再运行`npx vitest run tests/transcript-layout.test.ts tests/transcript-loading.test.ts`，17项通过，未重复全量测试。`git diff --check`通过。
+- 新增5项单元覆盖默认30秒/1–600整数验证、区间边界与跨界句完整保留、过滤后原始索引、中文/英文拼接间隔、storage初读和变更竞争及清理。设置偏好独立于资料库数据，修改后即时重排已有字幕。
+- 最终`node tests/video-transcript-browser.mjs`与`node tests/gdc-transcript-browser.mjs`均通过。共用`transcript-paragraphs-fixture.mjs`验证60句默认两段、左侧0:00/0:30、不同句悬停0:05/0:17、鼠标移至时间戳后仍显示；真实扩展设置页保存15秒变4段、重载保持15、拒绝0、60秒变1段、恢复30秒。支持聚焦句子后Enter到时间戳及Esc关闭，900/480/320px浮层边界与面板无横向溢出。
+- 原三站原生字幕读取、语言/搜索/纯文本、真实HTMLVideoElement5秒定位暂停、SPA/分P/GDC换iframe后10秒定位、B站SSR及错误恢复回归保留并通过。仅刻意模拟YouTube403有预期console；GDC errors=[]。最初新增设置页检查被测试路由兜底阻断，已让chrome-extension资源正常加载；聚焦触发滚动导致浮层消失是产品问题，已修正为保留焦点/悬停并按可见文本行定位后通过最终回归。
+- 已查看`test-results/transcript-paragraphs/`下最终bilibili-hover.png、youtube-320.png以及GDC悬停/窄屏与settings.png，明暗主题段落和浮层可读，长句可换行，浮层不被面板裁切。测试样本为合成字幕；本轮未访问用户登录页或重测实站字幕服务。用户重新加载扩展、刷新网页后应看到v0.3.0。
+
+## 0.2.53 字幕面板紧凑布局（2026-09-27）
+
+- 版本源五处一致0.2.53，`npm run build`含类型检查通过；`npx vitest run tests/transcript-loading.test.ts`既有12项通过。本轮为界面调整，未新增永久单元测试，也未重跑全部233项测试。
+- 将原`video-transcript-browser.mjs`与`gdc-transcript-browser.mjs`适配为先点击搜索图标，再执行原搜索流程；临时副本加入`test-results/check-compact-panel.mjs`进行视觉/交互检查后运行完整原回归。三站来源读取、语言切换、搜索、跳转暂停、SPA/分P/iframe替换、B站SSR、错误重试和窄屏均通过；仅刻意模拟YouTube403有预期console，GDC errors=[]。
+- 1400/480/320px检查语言框至多136px、搜索默认隐藏、图标同排、展开自动聚焦和不换行；验证Esc清除过滤并恢复全部字幕、关闭图标收起。问号来源弹窗含原来源/视频详情，边界在视口内，Esc/点击外部可关闭；底部可见文字仅v0.2.53，不含平台标签或LocalMark，旧说明和details入口均移除。
+- 已查看`test-results/compact-transcript/bilibili-closed.png`、`gdcvault-search-320.png`、`gdcvault-source-320.png`、`youtube-source-320.png`，明暗主题、窄屏无新增溢出，弹窗不被面板裁切。字幕文本为合成样本；本轮没有再次访问用户登录页面或实站字幕服务。截图中用户原页面为v0.2.51，刷新新构建后应为v0.2.53。
+
+## 0.2.52 字幕持续加载与通信诊断（2026-09-27）
+
+- 最终类型检查、dist构建、21文件233项单元测试通过；新增`tests/transcript-loading.test.ts`12项，覆盖三站后台无回复、读取无回复、迟到结果丢弃和重试恢复、脚本注入截止、页面/后台版本不符、原生通知合并、刷新期间用户语言选择保留。五处版本为0.2.52。
+- 隔离Chrome154.0.8037.58加载真实dist，在后台注入可控延迟/不返回故障：旧0.2.51遇900ms读取+300ms原生通知，4秒内13次读取、0字幕且busy；0.2.52同条件4次读取并显示字幕。分别让三站executeScript不返回，GDC5秒/双站15秒后显示对应读取超时且busy结束；恢复接口后点击重试均成功，pageerror为空。证据`test-results/transcript-channel-browser.mjs`、`transcript-channel-baseline.json`/`transcript-channel-fixed.json`及已查看的`transcript-loading-error.png`。这些是故障注入，不能当成用户浏览器真实触发条件。
+- 最终`node tests/video-transcript-browser.mjs`与`node tests/gdc-transcript-browser.mjs`通过；覆盖原生来源、完整字幕、语言/搜索、安全文本、定位暂停、B站SSR、SPA、分P/iframe替换、HTTP错误恢复及900/480/320px。只有刻意模拟YouTube403的预期console，GDC errors=[]。未重跑无关仪表盘/侧栏套件。
+- 0.2.51和0.2.52初次构建分别在隔离Chrome154实站重测用户GDC链接，英/中各585条，32.665秒paused=true、pageerror为空，未复现持续加载；0.2.52后续仅追加刷新期间保留用户语言选择，其最终构建已由上述单元/三站模拟回归覆盖，没有再重复实站。公开实站输出`test-results/gdcvault/chrome154-results.json`；脚本最后一次输出对应0.2.52。面板窄屏无溢出，原站744px宽度仍存在。
+- 未把广告拦截或COLS错误当作根因。CUA没有用户Chrome标签页；用户仅确认Chrome刷新后仍忙，未核实其页面版本。新版连接/读取截止与具体错误用于继续定位，不能由本地通过宣称用户问题已全部解决。重新加载扩展并刷新应看到v0.2.52。
+
+## 0.2.51 GDC Vault 字幕（2026-09-27）
+
+- 起始五处版本0.2.50；最终package/lock顶层及根包/public/dist manifest均0.2.51，content/sidepanel/dashboard构建内嵌版本一致；TypeScript与构建通过。
+- `npm test`：20文件221项通过。新增`tests/gdc-transcript.test.ts`10项覆盖会话身份、限定字幕URL、HLS多语言属性/相对URL、完整分片清单、WebVTT多行/实体/标签、时间映射/去重、顶层/iframe与视频源校验、目标文档跳转绑定、HTTP403不能被当成完整字幕。
+- `node tests/gdc-transcript-browser.mjs`：真实dist、两个不同域名的父页和iframe、真实HTMLVideoElement及网站播放器接口模拟。验证60行全文/跨片去重、原生中文默认、原生改English后自动同步、手动选中文、搜索、安全纯文本、Session Name上方插入、内嵌版本、真实媒体5秒跳转暂停及当前句、折叠、900/480/320px；覆盖403重试、同URL新iframe不能使用旧documentId、新绑定后可跳转、换会话和离开视频页。最终errors=[]；初次失败为测试在iframe替换过程调用已脱离frame，调整等待后通过，补充产品中文失效提示。
+- `node tests/video-transcript-browser.mjs`：B站/YouTube回归通过，含B站SSR初始化与根替换保护、语言/搜索/纯文本、暂停、分P/SPA、错误恢复和窄屏；只有刻意模拟YouTube403的预期console。未重跑无关仪表盘和原有45项侧栏套件。
+- 用户提供的真实GDC Vault链接`https://gdcvault.com/play/1034161/Game-Art-Career-Fireside-with`已在隔离未登录Chromium153加载最终dist验证。原生播放器HLS列出四种语言，实际完整读取English与Chinese (Simplified)，每条轨道306个WebVTT文件、合并585句；点击第9句后currentTime=32.665、paused=true、readyState=4，原生当前句32.6317–36.2687秒，与文件时间起点差约33毫秒。不是复制已加载的少量原生cues来冒充全文。pageerror=[]。
+- 已查看实站宽屏/320px与模拟专项截图。GDC页面480/320px时原有广告等使页面宽744px，隐藏字幕面板仍为744px，字幕面板本身无溢出。截图中网站Cookie提示层属于原站；未操作用户的浏览器登录或权限。实站证据`test-results/gdcvault/live-results.json`与截图、网页/播放器/清单公开诊断文件，专项报告`test-results/gdcvault-regression/results.json`。
+- GDC支持当前Blazestreaming/Video.js嵌入及页面直接video的现有字幕文件；对旧嵌入、无字幕、访问限制和不支持的清单明确报因。用户现有页仍需重载扩展并刷新后确认v0.2.51；本轮不新增字幕持久化或视频批注。
+
 ## 0.2.50 Bilibili 页面初始化冲突（2026-09-26）
 
 - 用户截图版本0.2.49。隔离Chromium153用实际BV1VxhU6BEKq页面，分别加载无扩展、旧dist及修复dist。旧版在Vue SSR树仍待接管时插入字幕宿主，复现与截图相同B站bundle中的toLowerCase异常和封面/评论不加载；无扩展正常。下载公开bundle核对调用栈为Vue hydration，$scopedSlots位置为后续组件prepatch；本轮仅实测复现前一条异常。

@@ -46,7 +46,7 @@ export async function elementChecks({ page, panel, context, base, out, until, ok
   };
   const save = async note => {
     await editor.locator("#wc-note").fill(note);
-    await editor.getByRole("button", { name: "确认保存", exact: true }).click();
+    await editor.getByRole("button", { name: "保存", exact: true }).click();
     await editor.waitFor({ state: "hidden" });
   };
   await toggle.waitFor();
@@ -97,13 +97,14 @@ export async function elementChecks({ page, panel, context, base, out, until, ok
   await page.locator("#card-heading").click();
   await picker.waitFor({ state: "hidden" });
   await editor.waitFor();
-  await editor.locator('[title="蓝色"]').click();
-  await save("整张卡片的批注");
+  await editor.locator("#wc-note").fill("整张卡片的批注");
+  await editor.getByLabel("绿色", { exact: true }).click();
+  await editor.waitFor({ state: "hidden" });
   await count(1);
   let elementMark = (await marks())[0];
   assert.equal(elementMark.anchor.kind, "element");
   assert.equal(elementMark.anchor.tag, "article", "left click keeps the ancestor selected with ArrowUp");
-  assert.equal(elementMark.color, "blue");
+  assert.equal(elementMark.color, "green");
   assert.equal((await savedPage()).schemaVersion, 3);
   const outline = host.locator(`[data-element-mark="${elementMark.id}"]`);
   await outline.waitFor();
@@ -139,7 +140,7 @@ export async function elementChecks({ page, panel, context, base, out, until, ok
   await pencil.click();
   await editor.waitFor();
   assert.equal(await editor.locator("#wc-note").inputValue(), "整张卡片的批注");
-  await editor.getByRole("button", { name: "取消", exact: true }).click();
+  await editor.getByRole("button", { name: "关闭编辑窗", exact: true }).click();
   await editor.waitFor({ state: "hidden" });
   await page.mouse.move(30, 110);
   await until(async () => await host.locator(".element-note-button").count() === 0, "leaving hides element pencil");
@@ -154,20 +155,21 @@ export async function elementChecks({ page, panel, context, base, out, until, ok
   await hoverTrackingChecks({ page, host, target: page.locator("#card-heading"), out, name: "element" });
   ok("element comment tracks the pointer continuously in white rather than anchoring to its pencil");
 
-  // Real text drag inside the element continues to use the old quick-highlight workflow.
+  // Real text drag inside the element continues to use the shared selection composer.
   const box = await page.locator("#card-text").boundingBox();
   await page.mouse.move(box.x + 1, box.y + 13);
   await page.mouse.down();
   await page.mouse.move(box.x + Math.min(box.width - 2, 230), box.y + 13, { steps: 12 });
   await page.mouse.up();
-  await host.getByLabel("高亮选中文字", { exact: true }).click();
+  await host.locator(".editor .swatch").first().click();
   await count(2);
   assert.equal((await marks()).filter(m => m.anchor.kind !== "element").length, 1);
   await page.locator("#card-heading").hover();
   await outline.locator("button").click();
-  await editor.locator('[title="紫色"]').click();
-  await save("修改后的元素批注");
-  await until(async () => (await marks()).find(m => m.id === elementMark.id)?.color === "purple", "element note edited");
+  await editor.locator("#wc-note").fill("修改后的元素批注");
+  await editor.getByLabel("粉色", { exact: true }).click();
+  await editor.waitFor({ state: "hidden" });
+  await until(async () => (await marks()).find(m => m.id === elementMark.id)?.color === "pink", "element note edited");
   const imageBefore = await page.locator("#card-image").boundingBox();
   await select("#card-image");
   await save("图片自己的批注");
@@ -354,7 +356,7 @@ export async function elementChecks({ page, panel, context, base, out, until, ok
   const er = await editor.boundingBox();
   assert.ok(er.x >= 0 && er.x + er.width <= 321 && er.y + er.height <= 601);
   await page.screenshot({ path: join(out, "element-editor-narrow.png") });
-  await editor.getByRole("button", { name: "取消", exact: true }).click();
+  await editor.getByRole("button", { name: "关闭编辑窗", exact: true }).click();
   await editor.waitFor({ state: "hidden" });
   await page.locator("#card-image").hover();
   await tooltip.locator(`[data-hover-mark="${imageMark.id}"]`).waitFor();

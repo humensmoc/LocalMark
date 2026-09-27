@@ -1,4 +1,9 @@
-export type VideoTarget = { site: "youtube" | "bilibili"; key: string };
+import { gdcTranscriptRequest } from "./gdc-transcript";
+import { transcriptDeadline } from "./transcript-async";
+export type VideoTarget = {
+  site: "youtube" | "bilibili" | "gdcvault";
+  key: string;
+};
 export type SubtitleCue = { start: number; end: number; text: string };
 export type Transcript = {
   key: string;
@@ -10,6 +15,9 @@ export type Transcript = {
 };
 export function videoTarget(href: string): VideoTarget | null {
   const u = new URL(href);
+  const session = u.pathname.match(/^\/play\/(\d+)(?:\/|$)/)?.[1];
+  if (/^(www\.)?gdcvault\.com$/.test(u.hostname) && session)
+    return { site: "gdcvault", key: `gdcvault:${session}` };
   if (
     /^(www\.)?youtube\.com$/.test(u.hostname) &&
     u.pathname === "/watch" &&
@@ -363,6 +371,8 @@ export async function transcriptRequest(
   message: { key: string; trackId?: string; refresh?: boolean },
   sender: chrome.runtime.MessageSender,
 ) {
+  if (/^gdcvault:/.test(message.key))
+    return gdcTranscriptRequest(message, sender);
   // Chrome can retain the document's original URL in MessageSender after
   // pushState. Validate its origin here, then its current video key in MAIN.
   const origin = sender.url ? new URL(sender.url) : null;
@@ -377,17 +387,22 @@ export async function transcriptRequest(
     (message.trackId !== undefined && typeof message.trackId !== "string")
   )
     throw Error("只能读取当前 Bilibili 或 YouTube 视频的字幕。");
-  const results = await chrome.scripting.executeScript({
-    target: {
-      tabId: sender.tab.id,
-      ...(sender.documentId
-        ? { documentIds: [sender.documentId] }
-        : { frameIds: [0] }),
-    },
-    world: "MAIN",
-    func: readVideoTranscript,
-    args: [message.key, message.trackId ?? "", message.refresh === true],
-  });
+  const results = await transcriptDeadline(
+    chrome.scripting.executeScript({
+      target: {
+        tabId: sender.tab.id,
+        ...(sender.documentId
+          ? { documentIds: [sender.documentId] }
+          : { frameIds: [0] }),
+      },
+      world: "MAIN",
+      injectImmediately: true,
+      func: readVideoTranscript,
+      args: [message.key, message.trackId ?? "", message.refresh === true],
+    }),
+    15000,
+    "读取网页字幕超时（15 秒）：网页脚本未返回结果，请重试。",
+  );
   const result = results[0]?.result;
   if (!result) throw Error("无法读取网页字幕，请刷新网页后重试。");
   if ("error" in result) throw Error(result.error);

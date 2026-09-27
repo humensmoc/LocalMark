@@ -73,7 +73,7 @@ export function Floating({
     exitRef.current = onExited;
   });
   useLayoutEffect(() => {
-    // A new selection starts beside its pencil; preserve a dragged position
+    // A new selection starts beside the pointer; preserve a dragged position
     // through input updates and while the current editor animates out.
     if (open) draggedPosition.current = null;
   }, [open, x, y, positionKey]);
@@ -262,7 +262,7 @@ export function Floating({
   }, [open, className, ref]);
   useLayoutEffect(() => {
     if (open) focusRef?.current?.focus({ preventScroll: true });
-  }, [open, focusRef]);
+  }, [open, focusRef, positionKey]);
   return (
     <div
       ref={ref}

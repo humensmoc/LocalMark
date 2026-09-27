@@ -1,4 +1,5 @@
 import { fixture } from "./video-native-fixture.mjs";
+import { hoverCue, verifyTranscriptParagraphs } from "./transcript-paragraphs-fixture.mjs";
 import { chromium } from "playwright";
 import { readFile, writeFile, mkdir, mkdtemp } from "node:fs/promises";
 import { resolve, join } from "node:path";
@@ -57,6 +58,7 @@ const cueText = (i) =>
 if (!live)
   await context.route("**/*", async (route) => {
     const u = new URL(route.request().url());
+    if (u.protocol === "chrome-extension:") return route.continue();
     if (u.pathname === "/test.wav") {
       const range = route
         .request()
@@ -267,6 +269,8 @@ try {
             h.previousElementSibling.classList.contains("up-info-container");
     }, site);
     assert(placement);
+    await verifyTranscriptParagraphs(context, p, panel, site);
+    await panel.getByRole("button", { name: "搜索字幕", exact: true }).click();
     const search = panel.getByRole("searchbox");
     await search.fill("Search this");
     assert.equal(await panel.locator(".cue").count(), 1);
@@ -290,7 +294,8 @@ try {
         ),
       ]);
     });
-    await panel.locator(".cue").nth(5).click();
+    await hoverCue(p, panel.locator(".cue").nth(5));
+    await panel.locator(".cue-time-button").click();
     try {
       await until(
         () =>

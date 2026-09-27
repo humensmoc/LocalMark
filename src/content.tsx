@@ -1,7 +1,9 @@
+import { colorInfo } from "./model";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  COLORS,
+  highlightPalette,
+  initialHighlightColor,
   canonicalUrl,
   emptyLibrary,
   pageToolEnabled,
@@ -79,13 +81,11 @@ function App() {
   const snapshot = useRef({ lib, current, draft, rebind, url, picking, marksVisible });
   snapshot.current = { lib, current, draft, rebind, url, picking, marksVisible };
   const refreshGeneration = useRef(0),
-    quickRef = useRef<HTMLDivElement>(null),
     elementButtonRef = useRef<HTMLButtonElement>(null),
     hoverPoint = useRef({ x: 0, y: 0 }),
     noteRef = useRef<HTMLTextAreaElement>(null),
     toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
-    hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
-    expandTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const keepHover = () => { clearTimeout(hoverTimer.current); hoverTimer.current = undefined; };
   const leaveHover = () => {
     if (hoverTimer.current) return;
@@ -124,7 +124,6 @@ function App() {
   function beginPick(mark: Mark | null = null) {
     if (snapshot.current.draft) throw Error("请先保存或取消当前批注，再选择元素。");
     clearTimeout(hoverTimer.current);
-    clearTimeout(expandTimer.current);
     setRebind(mark);
     setHover(null);
     setOverlaps(null);
@@ -152,7 +151,7 @@ function App() {
       const rect = element.getBoundingClientRect();
       setUrl(selectionUrl);
       setDraft({ anchor, element, validateElement: true, text: binding?.text ?? anchor.exact,
-        note: binding?.note ?? "", color: binding?.color ?? snapshot.current.lib.lastColor,
+        note: binding?.note ?? "", color: binding?.color ?? initialHighlightColor(snapshot.current.lib),
         id: binding?.id, expectedUpdatedAt: binding?.updatedAt,
         expectedMark: binding ? JSON.stringify(binding) : undefined,
         x: Math.max(12, Math.min(rect.right + 12, innerWidth - 340)),
@@ -264,6 +263,8 @@ function App() {
     document.addEventListener("scroll", layout, true);
     window.addEventListener("resize", layout);
     document.addEventListener("load", layout, true);
+    let selectionClickPending = false;
+    const down = () => { selectionClickPending = false; };
     const up = (e: MouseEvent) => {
       if (
         snapshot.current.picking || snapshot.current.rebind?.anchor.kind === "element" || snapshot.current.draft?.anchor.kind === "element" ||
@@ -284,6 +285,7 @@ function App() {
       if (r.commonAncestorContainer.parentElement?.closest("#" + HOST)) return;
       const captured = captureSelection(r);
       if (!captured) return;
+      selectionClickPending = true;
       const a = captured.anchor;
       if (captured.warning) tell(captured.warning);
       const selectionUrl = canonicalUrl(location.href);
@@ -296,7 +298,7 @@ function App() {
         anchor: a,
         text: binding && binding.text !== binding.anchor.exact ? binding.text : captured.text,
         note: binding?.note ?? "",
-        color: binding?.color ?? snapshot.current.lib.lastColor,
+        color: binding?.color ?? initialHighlightColor(snapshot.current.lib),
         id: binding?.id,
         expectedUpdatedAt: binding?.updatedAt,
         expectedMark: binding ? JSON.stringify(binding) : undefined,
@@ -354,6 +356,8 @@ function App() {
         ? previous : { ids, x: e.clientX, y: e.clientY });
     };
     const click = (e: MouseEvent) => {
+      // Focusing the note may collapse the page selection before its trailing click.
+      if (selectionClickPending) { selectionClickPending = false; return; }
       if (snapshot.current.picking) return;
       if (e.composedPath().some((n) => n instanceof Element && n.id === HOST))
         return;
@@ -368,13 +372,13 @@ function App() {
       e.preventDefault();
       setOverlaps({
         ids: hits,
-        x: Math.max(10, Math.min(e.clientX, innerWidth - 350)),
-        y: Math.max(10, Math.min(e.clientY, innerHeight - 440)),
+        x: e.clientX + 8,
+        y: e.clientY + 8,
       });
       setHover(null);
     };
     const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229) {
         clearTimeout(hoverTimer.current);
         setDraft(null);
         setHover(null);
@@ -386,6 +390,7 @@ function App() {
     const leavePage = () => { lastPointer = null; keepHover(); setHover(null); };
     document.addEventListener("mouseleave", leavePage);
     window.addEventListener("blur", leavePage);
+    document.addEventListener("mousedown", down, true);
     document.addEventListener("mouseup", up);
     document.addEventListener("mousemove", move);
     document.addEventListener("click", click, true);
@@ -398,12 +403,12 @@ function App() {
       clearInterval(interval);
       clearTimeout(paintTimer);
       clearTimeout(hoverTimer.current);
-      clearTimeout(expandTimer.current);
       clearTimeout(toastTimer.current);
       cancelAnimationFrame(frame);
       document.removeEventListener("scroll", layout, true);
       window.removeEventListener("resize", layout);
       document.removeEventListener("load", layout, true);
+      document.removeEventListener("mousedown", down, true);
       document.removeEventListener("mouseup", up);
       document.removeEventListener("mousemove", move);
       document.removeEventListener("click", click, true);
@@ -435,7 +440,7 @@ function App() {
       expectedMark: JSON.stringify(m),
       x,
       y,
-      expanded: true,
+      expanded: !!m.note,
       url: snapshot.current.url,
     });
     setOverlaps(null);
@@ -447,7 +452,7 @@ function App() {
       if (m) edit(m, overlaps.x, overlaps.y);
     }
   }, [overlaps]);
-  async function save() {
+  async function save(color?: Color) {
     if (!draft || busy) return;
     const d = draft;
     if (d.url !== canonicalUrl(location.href)) {
@@ -475,7 +480,7 @@ function App() {
           text: d.text ?? d.anchor.exact,
           anchor: d.anchor,
           note: d.note,
-          color: d.color,
+          color: color ?? d.color,
         },
       });
       setLib(next);
@@ -487,7 +492,7 @@ function App() {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
       if (!d.expanded) tell(message);
-      setDraft((current) => current === d ? { ...d, expanded: true } : current);
+      setDraft((current) => current === d ? { ...d, color: color ?? d.color, expanded: true } : current);
     } finally {
       setBusy(false);
     }
@@ -544,7 +549,7 @@ function App() {
       {draft?.anchor.kind === "element" && draft.element && <ElementOverlays preview items={[
         { id: "draft", element: draft.element, color: draft.color },
       ]} />}
-      {picking && <ElementPicker color={rebind?.color ?? lib.lastColor} select={selectElement} cancel={cancelPick} />}
+      {picking && <ElementPicker color={rebind?.color ?? initialHighlightColor(lib)} select={selectElement} cancel={cancelPick} />}
       {marksVisible && <div
         className="rail"
         style={{ left: "2px" }}
@@ -566,7 +571,7 @@ function App() {
             <button
               key={m.id}
               aria-label={"定位：" + m.text.slice(0, 25)}
-              style={{ top: top + "%", background: COLORS[m.color].hex }}
+              style={{ top: top + "%", background: colorInfo(m.color).hex }}
               onMouseEnter={(e) => {
                 if (draft || picking) return;
                 keepHover();
@@ -593,112 +598,48 @@ function App() {
           <button onClick={() => setRebind(null)}>取消</button>
         </div>
       )}
-      <FloatingPresence>{draft && !draft.id && draft.anchor.kind !== "element" && (
-        <Floating
-          className="quick"
-          elementRef={quickRef}
-          x={draft.x}
-          y={draft.y}
-          onMouseDown={(e) => {
-            e.preventDefault();
-          }}
-        >
-          <button
-            aria-label="高亮选中文字"
-            disabled={busy}
-            onMouseEnter={() => {
-              if (draft.expanded) return;
-              clearTimeout(expandTimer.current);
-              expandTimer.current = setTimeout(
-                () => setDraft((d) => (d ? { ...d, expanded: true } : d)),
-                350,
-              );
-            }}
-            onMouseLeave={() => clearTimeout(expandTimer.current)}
-            onClick={() => {
-              clearTimeout(expandTimer.current);
-              void save();
-            }}
-          >
-            <Icon name="pen" />
-          </button>
-        </Floating>
-      )}</FloatingPresence>
-      <FloatingPresence>{draft?.expanded && (
-        <Floating
-          className="editor"
-          x={draft.x}
-          y={draft.y}
-          anchorRef={draft.id || draft.anchor.kind === "element" ? undefined : quickRef}
-          focusRef={noteRef}
-          draggable
-          positionKey={draft.anchor}
-        >
-          <div className="row spread editor-header" data-floating-drag-handle title="按住标题栏拖动面板">
-            <b>{draft.anchor.kind === "element" ? (draft.id ? "编辑元素标注" : "新建元素标注") : (draft.id ? "编辑标注" : "新建标注")}</b>
-            <button aria-label="关闭编辑窗" onClick={() => setDraft(null)}>
-              <Icon name="close" size={16} />
-            </button>
-          </div>
-          <div className="excerpt">{draft.id ? painter.excerpts.get(draft.id) ?? draft.text ?? draft.anchor.exact : draft.text ?? draft.anchor.exact}</div>
-          {draft.anchor.kind !== "element" && draft.anchor.segments?.some(s => s.translation) && (
-            <div className="hint">已关联英文原文；关闭翻译或译文变化时，使用虚线标记对应段落。</div>
-          )}
-          <label>高亮颜色</label>
-          <div className="row colors">
-            {Object.entries(COLORS).map(([key, c]) => (
-              <button
-                key={key}
-                title={c.name}
-                aria-label={c.name}
-                aria-pressed={draft.color === key}
-                className={"swatch " + (draft.color === key ? "selected" : "")}
-                style={{ "--mark": c.hex } as React.CSSProperties}
-                onClick={() => setDraft({ ...draft, color: key as Color })}
-              />
-            ))}
-          </div>
-          <label htmlFor="wc-note">批注</label>
-          <textarea
-            ref={noteRef}
-            id="wc-note"
-            placeholder="写下你的想法…"
-            value={draft.note}
-            onChange={(e) => setDraft({ ...draft, note: e.target.value })}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                !e.nativeEvent.isComposing &&
-                e.keyCode !== 229
-              ) {
-                e.preventDefault();
-                void save();
-              }
-            }}
-          />
-          <div className="hint">Enter 保存 · Shift+Enter 换行</div>
-          {error && <p className="error">{error}</p>}
-          <div className="row editor-foot">
-            {draft.id && current && (
-              <button
-                className="danger"
-                onClick={() => {
-                  const m = current.annotations.find((m) => m.id === draft.id);
-                  if (m) void remove(current, m);
-                }}
-              >
-                删除
+      <FloatingPresence>{draft && (
+        <Floating className="editor" x={draft.x} y={draft.y}
+          focusRef={noteRef} draggable positionKey={draft.anchor}>
+          <div className={"annotation-composer" + (draft.expanded ? " composer-expanded" : "")}
+            role="dialog" aria-label={draft.id ? "编辑标注" : "新建标注"}
+            onKeyDown={event => event.stopPropagation()}>
+            <div className="editor-header" data-floating-drag-handle title="按住空白处拖动浮窗">
+              <div className="colors" role="group" aria-label="高亮颜色">
+                {(draft.id && !highlightPalette(lib).includes(draft.color)
+                  ? [...highlightPalette(lib), draft.color] : highlightPalette(lib)).map(color => (
+                  <button key={color} type="button" disabled={busy}
+                    title={colorInfo(color).name + " · 点击保存高亮和批注"}
+                    aria-label={colorInfo(color).name} aria-pressed={draft.color === color}
+                    className={"swatch " + (draft.color === color ? "selected" : "")}
+                    style={{ "--mark": colorInfo(color).hex } as React.CSSProperties}
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={() => void save(color)} />
+                ))}
+              </div>
+              <span className="composer-grip" aria-hidden="true" />
+              {draft.id && current && <button className="danger composer-delete" disabled={busy} onClick={() => {
+                const mark = current.annotations.find(mark => mark.id === draft.id);
+                if (mark) void remove(current, mark);
+              }}>删除</button>}
+              <button aria-label="关闭编辑窗" disabled={busy} onClick={() => setDraft(null)}>
+                <Icon name="close" size={15} />
               </button>
-            )}
-            <button onClick={() => setDraft(null)}>取消</button>
-            <button
-              disabled={busy}
-              className="primary"
-              onClick={() => void save()}
-            >
-              {busy ? "保存中…" : "确认保存"}
-            </button>
+            </div>
+            <div className="composer-input">
+            <textarea ref={noteRef} id="wc-note" aria-label="批注" rows={1} maxLength={100000}
+              placeholder="写下你的想法…" value={draft.note} disabled={busy}
+              onClick={() => setDraft({ ...draft, expanded: true })}
+              onChange={event => setDraft({ ...draft, note: event.target.value, expanded: true })}
+              onKeyDown={event => {
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+                  event.preventDefault(); void save();
+                }
+              }} />
+            {draft.expanded && <button disabled={busy} className="primary composer-save" aria-busy={busy}
+              onClick={() => void save()}>保存</button>}
+            </div>
+            {error && <p className="error" role="alert">{error}</p>}
           </div>
         </Floating>
       )}</FloatingPresence>
@@ -713,8 +654,8 @@ function App() {
                   key={id}
                   onClick={() => edit(m, overlaps.x, overlaps.y)}
                 >
-                  <span style={{ color: COLORS[m.color].hex }}>
-                    {COLORS[m.color].name} ·{" "}
+                  <span style={{ color: colorInfo(m.color).hex }}>
+                    {colorInfo(m.color).name} ·{" "}
                   </span>
                   {m.note || m.text}
                 </button>

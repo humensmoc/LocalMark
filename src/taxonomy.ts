@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { DEFAULT_CATEGORIES, type Library, type Page, type Taxonomy, type Taxon } from "./model";
+import { ColorSchema, DEFAULT_CATEGORIES, type Library, type Page, type Taxonomy, type Taxon } from "./model";
 
 export const UNCATEGORIZED = "category:uncategorized";
 export const TAXONOMY_PATH = "分类标签.json";
 export type TaxonKind = "categories" | "tags";
 const description = z.string().max(100000);
-const colorId = z.enum(["yellow", "green", "blue", "pink", "purple"]);
+const colorId = ColorSchema;
 const item = z.object({ id: z.string().min(1).max(500), name: z.string().trim().min(1).max(100), description: description.optional() });
 export const TaxonomySchema = z.object({
   version: z.literal(1), revision: z.string().min(1),

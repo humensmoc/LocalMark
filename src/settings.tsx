@@ -4,6 +4,8 @@ import * as db from "./db";
 import { emptyLibrary, PAGE_TOOLS, pageToolEnabled, type Entry, type Library } from "./model";
 import { request } from "./protocol";
 import { Icon } from "./Icon";
+import { TranscriptSettings } from "./TranscriptSettings";
+import { HighlightSettings } from "./HighlightSettings";
 import "./settings.css";
 function Settings() {
   const [lib, setLib] = useState<Library>(emptyLibrary()),
@@ -123,6 +125,8 @@ function Settings() {
           </div>
         </div>)}
       </section>
+      <TranscriptSettings />
+      <HighlightSettings lib={lib} saved={setLib} />
       <section>
         <h2>连接你的本地文件夹</h2>
         <p>
@@ -273,7 +277,7 @@ function Settings() {
         <h2>怎么使用</h2>
         <ol>
           <li>
-            在普通网页选中文字，点击笔形按钮保存；悬停按钮可选颜色、写批注。网页标签在侧栏“当前页面”中添加，点击
+            在普通网页选中文字，鼠标旁会出现颜色和批注浮窗。点击颜色保存，或直接打字、按 Enter 保存；按住上排空白处可拖动。网页标签在侧栏“当前页面”中添加，点击
             + 可以搜索已有标签或新建。
           </li>
           <li>

@@ -1,4 +1,5 @@
 import type { Anchor, Mark, Color } from "./model";
+import { colorInfo, ColorSchema } from "./model";
 import { locateElement } from "./element-anchors";
 import { existingQuoteLayout, readableQuote } from "./quote-layout";
 export const HOST = "local-web-clipper-root";
@@ -338,6 +339,9 @@ export class Painter {
   approximate = new Set<string>();
   excerpts = new Map<string, string>();
   private colors: Color[] = ["yellow", "green", "blue", "pink", "purple"];
+  private colorSheet?: CSSStyleSheet;
+  private colorRules = "";
+  private colorName(color: Color) { return color.replace("#", "hex-"); }
   paint(marks: Mark[], reuse = false) {
     // Standalone callers retain fresh-DOM semantics. Reuse requires the caller
     // to observe DOM changes and invalidate, as the content script does.
@@ -398,11 +402,31 @@ export class Painter {
     }
     const api = (CSS as unknown as { highlights?: Registry }).highlights,
       H = (window as unknown as { Highlight?: HighlightCtor }).Highlight;
-    if (api && H && this.visible)
-      for (const c of this.colors) {
-        api.set("wc-" + c, new H(...(grouped.get(c) ?? [])));
-        api.set("wc-context-" + c, new H(...(context.get(c) ?? [])));
+    if (api && H && this.visible) {
+      const colors = [...new Set(marks.map(mark => mark.color))].filter(color => ColorSchema.safeParse(color).success);
+      for (const color of this.colors) if (!colors.includes(color)) {
+        api.delete("wc-" + this.colorName(color));
+        api.delete("wc-context-" + this.colorName(color));
       }
+      this.colors = colors;
+      const rules = colors.filter(color => color.startsWith("#")).map(color => {
+        const hex = colorInfo(color).hex;
+        const rgb = [1, 3, 5].map(start => parseInt(hex.slice(start, start + 2), 16));
+        const ink = rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114 > 150 ? "#17231f" : "#ffffff";
+        return `::highlight(wc-${this.colorName(color)}) { background: ${hex}; color: ${ink}; } ::highlight(wc-context-${this.colorName(color)}) { text-decoration: underline dashed ${hex}; }`;
+      }).join("\n");
+      if (rules !== this.colorRules) {
+        this.colorSheet ??= new CSSStyleSheet();
+        this.colorSheet.replaceSync(rules);
+        this.colorRules = rules;
+      }
+      if (this.colorSheet && !document.adoptedStyleSheets.includes(this.colorSheet))
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, this.colorSheet];
+      for (const c of this.colors) {
+        api.set("wc-" + this.colorName(c), new H(...(grouped.get(c) ?? [])));
+        api.set("wc-context-" + this.colorName(c), new H(...(context.get(c) ?? [])));
+      }
+    }
     return this.ranges;
   }
   hit(x: number, y: number) {
@@ -452,9 +476,10 @@ export class Painter {
   private clearHighlights() {
     const api = (CSS as unknown as { highlights?: Registry }).highlights;
     for (const c of this.colors) {
-      api?.delete("wc-" + c);
-      api?.delete("wc-context-" + c);
+      api?.delete("wc-" + this.colorName(c));
+      api?.delete("wc-context-" + this.colorName(c));
     }
     api?.delete("wc-focus");
+    if (this.colorSheet) document.adoptedStyleSheets = document.adoptedStyleSheets.filter(sheet => sheet !== this.colorSheet);
   }
 }

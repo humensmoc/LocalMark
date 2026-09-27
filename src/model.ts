@@ -8,7 +8,25 @@ export const COLORS = {
   pink: { name: "粉色", hex: "#f3a4c7" },
   purple: { name: "紫色", hex: "#c2abf5" },
 } as const;
-export type Color = keyof typeof COLORS;
+export const ColorSchema = z.union([
+  z.enum(["yellow", "green", "blue", "pink", "purple"]),
+  z.string().regex(/^#[0-9a-f]{6}$/i).transform(value => value.toLowerCase() as `#${string}`),
+]);
+export type Color = z.infer<typeof ColorSchema>;
+export const colorInfo = (color: Color) => color.startsWith("#")
+  ? { name: color.toUpperCase(), hex: color }
+  : COLORS[color as keyof typeof COLORS];
+export const DEFAULT_HIGHLIGHT_PALETTE: Color[] = ["pink", "yellow", "green"];
+export const HighlightPaletteSchema = z.array(ColorSchema).min(1).max(8)
+  .refine(colors => new Set(colors.map(color => colorInfo(color).hex)).size === colors.length, "请使用不同的颜色");
+export const highlightPalette = (lib: Library): Color[] => {
+  const result = HighlightPaletteSchema.safeParse(lib.highlightPalette);
+  return result.success ? result.data : DEFAULT_HIGHLIGHT_PALETTE;
+};
+export const initialHighlightColor = (lib: Library) => {
+  const palette = highlightPalette(lib);
+  return palette.includes(lib.lastColor) ? lib.lastColor : palette[0];
+};
 export const PageCommentSchema = z.string().max(100000);
 export const PageRatingSchema = z.number().int().min(1).max(5);
 export const DEFAULT_CATEGORY = "未分类";
@@ -44,7 +62,7 @@ export const MarkSchema = z
     text: z.string().min(1).max(100000),
     note: z.string().max(100000),
     tags: z.array(z.string().min(1).max(100)).max(50),
-    color: z.enum(["yellow", "green", "blue", "pink", "purple"]),
+    color: ColorSchema,
     anchor: AnchorSchema,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -127,6 +145,7 @@ export type Entry = {
   legacyMdBase?: string | null;
 };
 export type Library = {
+  highlightPalette?: Color[];
   showPageTools?: boolean;
   pageTools?: Partial<Record<PageTool, boolean>>;
   autoGenerateMarkdown?: boolean;

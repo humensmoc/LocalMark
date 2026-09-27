@@ -497,10 +497,10 @@ try {
   assert.equal(await host.locator(".panel").count(), 0);
   const editor = host.locator(".editor");
   const note = host.locator("#wc-note");
-  const quick = host.getByLabel("高亮选中文字", { exact: true });
+  const quick = editor.locator(".swatch").first();
   async function dragEditor(dx, dy) {
-    const handle = await editor.locator(".editor-header").boundingBox();
-    const x = handle.x + 60, y = handle.y + handle.height / 2;
+    const handle = await editor.locator(".composer-grip").boundingBox();
+    const x = handle.x + handle.width / 2, y = handle.y + handle.height / 2;
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(x + dx, y + dy, { steps: 12 });
@@ -547,13 +547,15 @@ try {
   );
   await page.mouse.up();
   assert.equal(
-    await page.evaluate(() => getSelection().toString()),
-    "Highlight this passage",
+    await note.evaluate(el => el.getRootNode().activeElement === el),
+    true,
   );
-  await finishMotion(host.locator(".quick"));
-  const quickBefore = await quick.boundingBox();
+  await finishMotion(editor);
+  const compactBefore = await editor.boundingBox();
+  assert.equal(await editor.locator(".swatch").count(), 3);
+  assert.equal(await host.locator(".quick").count(), 0);
   const scrollBeforeFocus = await page.evaluate(() => scrollY);
-  await quick.hover();
+  await note.click();
   await note.waitFor();
   assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
   assert.equal(await page.evaluate(() => scrollY), scrollBeforeFocus);
@@ -562,9 +564,9 @@ try {
   await inspectMidpoint(editor);
   await page.screenshot({ path: join(out, "floating-editor-midpoint.png") });
   await finishMotion(editor);
-  assert.deepEqual(await quick.boundingBox(), quickBefore);
+  assert.ok((await editor.boundingBox()).width >= compactBefore.width);
   const editorBounds = await editor.boundingBox();
-  assert.ok(editorBounds.y >= quickBefore.y + quickBefore.height || editorBounds.y + editorBounds.height <= quickBefore.y);
+  assert.ok(editorBounds.y >= 12);
   await page.screenshot({ path: join(out, "floating-editor-focused.png") });
   await dragEditor(-240, -110);
   const draggedBounds = await editor.boundingBox();
@@ -575,12 +577,12 @@ try {
   await page.keyboard.insertText("。");
   await page.keyboard.press("Backspace");
   assert.equal(await note.inputValue(), "悬停后直接输入的批注");
-  assert.deepEqual(await editor.boundingBox(), draggedBounds, "typing does not snap back to the pencil");
-  assert.deepEqual(await quick.boundingBox(), quickBefore, "dragging leaves quick-save in place");
+  assert.deepEqual(await editor.boundingBox(), draggedBounds, "typing does not reset the dragged position");
+  assert.equal(await editor.locator(".swatch").count(), 3);
   await page.screenshot({ path: join(out, "floating-editor-dragged.png") });
-  ok("dragging the title bar moves the editor outside its starting bounds while preserving focus, text and quick-save position");
+  ok("dragging the title bar moves the editor outside its starting bounds while preserving focus, text and the color row");
   await pauseExit(editor);
-  await page.mouse.click(quickBefore.x + quickBefore.width / 2, quickBefore.y + quickBefore.height / 2);
+  await quick.click();
   await until(
     async () => (await entry("/spa"))?.page.annotations.length === 1,
     "highlight persisted",
@@ -594,13 +596,13 @@ try {
       ),
     "live highlight in panel",
   );
-  await host.locator(".quick").waitFor({ state: "hidden" });
+  assert.equal(await host.locator(".quick").count(), 0);
   assert.equal((await entry("/spa")).page.annotations[0].note, "悬停后直接输入的批注");
   await until(() => editor.getAttribute("data-state").then(s => s === "closing"), "editor exit starts");
   assert.equal(await editor.evaluate(el => el.inert && getComputedStyle(el).pointerEvents === "none"), true);
   await finishMotion(editor);
   await editor.waitFor({ state: "detached" });
-  ok("hovering the stationary pencil focuses the note without scrolling; direct typing, quick save and animated exit work");
+  ok("the composer focuses the note without scrolling; typing, color save and animated exit work");
 
   // Both original text and the margin rail expose the same animated preview.
   await page.locator("#first b").hover();
@@ -634,7 +636,7 @@ try {
   await panel.click(".card.current .tools button:nth-child(2)");
   await host.locator('.editor[data-state="open"]').waitFor();
   await host.locator("#wc-note").fill("   \n  ");
-  await host.getByRole("button", { name: "确认保存", exact: true }).click();
+  await host.getByRole("button", { name: "保存", exact: true }).click();
   await host.locator(".editor").waitFor({ state: "detached" });
   await until(async () => !(await entry("/spa")).page.annotations[0].note.trim(), "empty note persisted");
   await page.locator("#first b").hover();
@@ -657,7 +659,7 @@ try {
   assert.ok(editAfterDrag.x > editBeforeDrag.x && editAfterDrag.y > editBeforeDrag.y);
   await host.locator("#wc-note").fill("来自侧栏编辑的批注");
   assert.deepEqual(await editor.boundingBox(), editAfterDrag);
-  await host.getByRole("button", { name: "确认保存", exact: true }).click();
+  await host.getByRole("button", { name: "保存", exact: true }).click();
   await until(
     () =>
       panel.evaluate(
@@ -718,7 +720,7 @@ try {
       }),
     );
   });
-  await host.getByRole("button", { name: "确认保存", exact: true }).click();
+  await host.getByRole("button", { name: "保存", exact: true }).click();
   await until(
     async () =>
       (await entry("/spa"))?.page.annotations[0].text.startsWith("同一篇文章"),
@@ -741,13 +743,13 @@ try {
       }));
     });
     await quick.waitFor();
-    await finishMotion(host.locator(".quick"));
+    await finishMotion(editor);
   }
   await editor.waitFor({ state: "detached" });
   await pageCDP.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 620, deviceScaleFactor: 1, mobile: false });
   await selectBottom();
   const narrowScroll = await page.evaluate(() => scrollY);
-  await quick.hover();
+  await note.click();
   await note.waitFor();
   assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
   assert.equal(await page.evaluate(() => scrollY), narrowScroll);
@@ -771,7 +773,7 @@ try {
   assert.equal(await editor.evaluate(el => el.scrollWidth <= el.clientWidth), true);
   await page.screenshot({ path: join(out, "floating-editor-dragged-narrow.png") });
   const resizedBounds = await editor.boundingBox();
-  await editor.getByRole("button", { name: "绿色", exact: true }).click();
+  await editor.getByRole("button", { name: "绿色", exact: true }).hover();
   assert.deepEqual(await editor.boundingBox(), resizedBounds, "color controls do not drag or reset the editor");
   await note.focus();
   await page.keyboard.insertText("直接输入第一行");
@@ -784,7 +786,7 @@ try {
   await pageCDP.send("Emulation.clearDeviceMetricsOverride");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await selectBottom();
-  await quick.hover();
+  await note.click();
   await note.waitFor();
   assert.equal(await editor.evaluate(el => Number(getComputedStyle(el).opacity) === 1 && el.getAnimations().every(a => a.playState !== "running")), true);
   assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
@@ -823,7 +825,7 @@ try {
       ),
     "immediate SPA URL",
   );
-  await host.getByLabel("高亮选中文字", { exact: true }).click();
+  await editor.locator(".swatch").first().click();
   await until(
     async () => (await entry("/instant"))?.page.annotations.length === 1,
     "immediate SPA selection persisted",
@@ -832,15 +834,15 @@ try {
   ok(
     "selection immediately after pushState survives URL synchronization and saves only to the new page",
   );
-  await host.locator(".quick").waitFor({ state: "detached" });
+  await editor.waitFor({ state: "detached" });
   await selectBottom();
-  await quick.hover();
+  await note.click();
   await note.waitFor();
   await page.keyboard.insertText("自动聚焦后回车保存");
   await page.keyboard.press("Enter");
   await until(async () => (await entry("/instant"))?.page.annotations.some(mark => mark.note === "自动聚焦后回车保存"), "Enter saves immediately typed note");
   await editor.waitFor({ state: "detached" });
-  ok("Enter saves a note typed after hover without ever clicking the comment input");
+  ok("Enter saves a note typed after selection without ever clicking the comment input");
   // Restricted pages must not retain the previous article as an editable current page.
   await second.goto("chrome://version");
   await second.bringToFront();
@@ -1126,7 +1128,7 @@ try {
   await page.locator("#card-heading").click();
   const standaloneEditor = page.locator('#local-web-clipper-root .editor[data-state="open"]');
   await standaloneEditor.waitFor();
-  await standaloneEditor.getByRole("button", { name: "取消", exact: true }).click();
+  await standaloneEditor.getByRole("button", { name: "关闭编辑窗", exact: true }).click();
   await standaloneEditor.waitFor({ state: "hidden" });
   await page.locator("#local-web-clipper-root .editor").waitFor({ state: "hidden" });
   await page.screenshot({ path: join(out, "element-edge-sidebar-closed.png") });

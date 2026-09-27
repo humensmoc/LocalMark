@@ -1,3 +1,4 @@
+import { colorInfo } from "./model";
 import { useState, type CSSProperties } from "react";
 import { COLORS, type Color, type Library, type Page, type Mark } from "./model";
 import { Icon } from "./Icon";
@@ -25,8 +26,8 @@ export const changedDescription = (d: DescriptionDraft) => d.value !== d.base ||
 
 export function catalogItems(lib: Library, kind: CatalogKind): CatalogItem[] {
   const pages = Object.values(lib.entries).map(e => e.page);
-  if (kind === "colors") return (Object.keys(COLORS) as Color[]).map(color => ({
-    id: color, name: COLORS[color].name, color,
+  if (kind === "colors") return ([...new Set<Color>([...Object.keys(COLORS) as Color[], ...pages.flatMap(page => page.annotations.map(mark => mark.color)), ...Object.keys(lib.taxonomy?.colorDescriptions ?? {}) as Color[]])]).map(color => ({
+    id: color, name: colorInfo(color).name, color,
     description: lib.taxonomy?.colorDescriptions?.[color] ?? "",
     count: pages.reduce((n, p) => n + p.annotations.filter(m => m.color === color).length, 0),
   }));
@@ -38,7 +39,7 @@ export function catalogItems(lib: Library, kind: CatalogKind): CatalogItem[] {
 export function LibraryNavigation({ view, lib, change }: { view: LibraryView; lib: Library; change: (view: LibraryView) => void }) {
   const pages = Object.values(lib.entries).map(e => e.page);
   const counts = { pages: pages.length, categories: lib.taxonomy?.categories.length ?? 0, tags: lib.taxonomy?.tags.length ?? 0,
-    highlights: pages.reduce((n, p) => n + p.annotations.length, 0), colors: Object.keys(COLORS).length };
+    highlights: pages.reduce((n, p) => n + p.annotations.length, 0), colors: catalogItems(lib, "colors").length };
   return <nav className="library-navigation" aria-label="资料库视图">
     <small className="rail-label">资料库</small>
     {LIBRARY_VIEWS.map(item => <button key={item.id} aria-current={view === item.id ? "page" : undefined}
@@ -71,7 +72,7 @@ export function CatalogGrid({ lib, kind, query, selected, choose, manage }: {
       <button onClick={manage}>新建{kind === "categories" ? "主分类" : "子标签"}</button></div>}</div>
     {mode === "treemap" && kind !== "colors" && !!items.length ? <CatalogTreemap items={items} allItems={allItems} kind={kind} filtered={!!query.trim()} selected={selected} choose={choose} /> : <div className={`catalog-grid${kind === "colors" ? "" : " taxonomy-grid"}`}>
       {items.map(item => <button key={item.id} className={`catalog-card ${selected === item.id ? "selected" : ""}`} aria-pressed={selected === item.id} onClick={() => choose(item.id)}>
-        <span className="catalog-card-title">{item.color ? <i className="catalog-color" style={{ background: COLORS[item.color].hex }} /> : <Icon name={kind === "categories" ? "folder" : "tag"} />}<strong>{item.name}</strong></span>
+        <span className="catalog-card-title">{item.color ? <i className="catalog-color" style={{ background: colorInfo(item.color).hex }} /> : <Icon name={kind === "categories" ? "folder" : "tag"} />}<strong>{item.name}</strong></span>
         <span className={`catalog-description ${item.description ? "" : "muted"}`}>{item.description || "暂无说明"}</span>
         <small>{item.count} {kind === "colors" ? "条高亮" : "个网页"}</small>
       </button>)}
@@ -92,7 +93,7 @@ function ContentTags({ page }: { page: Page }) {
   </div>;
 }
 export function HighlightCard({ page, mark, open, showSource = true }: { page: Page; mark: Mark; open: (p: Page) => void; showSource?: boolean }) {
-  return <article className="content-card" data-mark-id={mark.id} style={{ "--mark": COLORS[mark.color].hex } as CSSProperties}>
+  return <article className="content-card" data-mark-id={mark.id} style={{ "--mark": colorInfo(mark.color).hex } as CSSProperties}>
     <div className="content-card-body" tabIndex={0} role="region" aria-label="高亮和批注内容">
       {mark.anchor.kind === "element" && <small className="element-kind">元素 · {mark.anchor.tag}</small>}
       <blockquote>{mark.text}</blockquote>
@@ -146,7 +147,7 @@ export function CatalogDetail({ lib, kind, item, draft, change, reset, mutate, o
     : kind === "categories" ? p.categoryId === item.id : p.tagIds?.includes(item.id)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return <div className="catalog-detail">
     <small className="rail-label">{kind === "categories" ? "主分类" : kind === "tags" ? "子标签" : "颜色"}详情</small>
-    <h2>{item.color && <i className="catalog-color" style={{ background: COLORS[item.color].hex }} />}{item.name}</h2>
+    <h2>{item.color && <i className="catalog-color" style={{ background: colorInfo(item.color).hex }} />}{item.name}</h2>
     <p className="muted">{item.count} {kind === "colors" ? "条高亮" : "个关联网页"}</p>
     <form onSubmit={async e => { e.preventDefault(); setBusy(true); setError("");
       try { await mutate({ type: "taxonomy", expected: d.expected, action: nameChanged && kind !== "colors"

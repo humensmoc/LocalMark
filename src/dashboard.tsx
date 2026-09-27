@@ -1,3 +1,4 @@
+import { colorInfo } from "./model";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -544,7 +545,7 @@ function MarkEditor({
       <article
         className="mark-editor mark-preview"
         aria-label={mark.anchor.kind === "element" ? "元素标注" : "高亮摘录"}
-        style={{ "--mark": COLORS[mark.color].hex } as React.CSSProperties}
+        style={{ "--mark": colorInfo(mark.color).hex } as React.CSSProperties}
       >
         <div className="mark-preview-heading">
           {mark.anchor.kind === "element" && <small className="element-kind">元素 · {mark.anchor.tag}</small>}
@@ -565,7 +566,7 @@ function MarkEditor({
   return (
     <article
       className="mark-editor"
-      style={{ "--mark": COLORS[d.color].hex } as React.CSSProperties}
+      style={{ "--mark": colorInfo(d.color).hex } as React.CSSProperties}
       aria-label="编辑高亮"
     >
       <fieldset disabled={busy}>
@@ -586,7 +587,7 @@ function MarkEditor({
           </small>
         )}
         <div className="row colors" role="group" aria-label="高亮颜色">
-          {Object.entries(COLORS).map(([color, value]) => (
+          {[...new Set<Color>([d.color, ...Object.keys(COLORS) as Color[]])].map(color => [color, colorInfo(color)] as const).map(([color, value]) => (
             <button
               key={color}
               className={`swatch${d.color === color ? " selected" : ""}`}

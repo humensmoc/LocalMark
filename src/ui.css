@@ -447,20 +447,21 @@ small {
 .hover-note + .hover-note {
   margin-top: 10px;
 }
-.quick {
-  z-index: 1;
-  width: auto;
-  padding: 0;
-  border-radius: 7px;
-  overflow: hidden;
-}
-.quick button {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  justify-content: center;
-  color: #ffdf83;
-}
+.editor { z-index: 7; width: min(248px, calc(100vw - 24px)); padding: 10px; border-color: #45464b; background: #191a1d; box-shadow: 0 8px 28px #0005; }
+.editor:has(.composer-expanded) { width: min(356px, calc(100vw - 24px)); }
+.editor-header { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; min-width: 0; }
+.editor-header .colors { display: flex; gap: 8px; padding: 4px; margin: -4px; min-width: 0; overflow-x: auto; }
+.editor-header .swatch { width: 25px; height: 25px; flex-shrink: 0; }
+.editor-header > button { padding: 3px; flex-shrink: 0; color: #a9aab1; }
+.editor-header .composer-delete { color: #f2a8ab; padding: 3px 5px; font-size: 12px; }
+.editor-header .swatch.selected { outline-width: 1.5px; outline-offset: 1px; }
+.composer-grip { flex: 1; min-width: 20px; align-self: stretch; display: flex; justify-content: flex-end; align-items: center; }
+.composer-grip::after { content: ""; width: 10px; height: 15px; background: radial-gradient(circle, #777983 1px, transparent 1.5px) 0 0 / 5px 5px; }
+.composer-input { position: relative; }
+.editor textarea { display: block; min-height: 36px; height: 36px; max-height: 40vh; resize: none; padding: 7px 9px; line-height: 20px; border-color: #44464f; background: #232429; font-size: 13px; }
+.editor textarea:focus { outline: none; border-color: #85c9b4; box-shadow: 0 0 0 1px #85c9b430; }
+.composer-expanded textarea { height: 126px; min-height: 86px; resize: vertical; padding-right: 65px; }
+.composer-save { position: absolute; right: 14px; bottom: 9px; z-index: 1; padding: 4px 9px; font-size: 12px; line-height: 20px; }
 .editor-header {
   cursor: grab;
   user-select: none;
@@ -503,10 +504,6 @@ small {
 .colors {
   gap: 11px;
   padding: 8px 1px;
-}
-.editor-foot {
-  margin-top: 12px;
-  justify-content: flex-end;
 }
 .tooltip {
   width: min(300px, calc(100vw - 20px));

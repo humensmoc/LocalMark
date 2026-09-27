@@ -102,6 +102,8 @@ section {
   font-size: 12px;
   color: #a7b5c6;
 }
+.transcript-setting { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.transcript-setting input { width: 90px; padding: 7px 10px; border: 1px solid #627086; border-radius: 6px; background: #141a22; color: inherit; font: inherit; }
 .setting-switch {
   appearance: none;
   width: 44px;
@@ -262,3 +264,10 @@ article {
     gap: 16px;
   }
 }
+.highlight-settings fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.palette-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 10px; margin: 16px 0; }
+.palette-setting { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px; border: 1px solid #303642; border-radius: 10px; }
+.palette-setting input[type="color"] { width: 34px; height: 34px; padding: 2px; flex-shrink: 0; cursor: pointer; border-radius: 50%; }
+.palette-setting label, .palette-setting code { white-space: nowrap; font-size: 12px; }
+.palette-setting button { margin-left: auto; padding: 5px; }
+.palette-actions { flex-wrap: wrap; }

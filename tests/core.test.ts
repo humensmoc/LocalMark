@@ -17,6 +17,9 @@ import {
   type Page,
   type Entry,
   DEFAULT_CATEGORY,
+  HighlightPaletteSchema,
+  highlightPalette,
+  initialHighlightColor,
 } from "../src/model";
 import { capture, indexText, locate } from "../src/anchors";
 import { SyncEngine } from "../src/sync";
@@ -24,6 +27,26 @@ import type { Files } from "../src/files";
 Object.defineProperty(globalThis, "crypto", { value: webcrypto });
 const exportingLibrary = () => ({ ...emptyLibrary(), autoGenerateMarkdown: true });
 const markId = "12b942f7-841f-4f5d-bdd5-8d404706125c";
+it("round-trips custom colors while rejecting CSS payloads and ambiguous palettes", async () => {
+  const p = await fixture();
+  p.annotations[0].color = "#12ABef";
+  const restored = await parsePage(JSON.stringify(p));
+  expect(restored.annotations[0].color).toBe("#12abef");
+  expect((await parsePage(JSON.stringify(restored))).annotations).toEqual(restored.annotations);
+  for (const color of ["red", "#abc", "#ffffff; color:red", "url(https://example.com)"]) {
+    await expect(parsePage(JSON.stringify({ ...p, annotations: [{ ...p.annotations[0], color }] }))).rejects.toThrow();
+  }
+  for (const palette of [[], ["yellow", "#FFE68B"], Array(9).fill("blue"), ["bad"]]) {
+    expect(HighlightPaletteSchema.safeParse(palette).success).toBe(false);
+  }
+});
+it("uses the configured palette after retiring the last-used color without changing existing marks", () => {
+  const lib = { ...emptyLibrary(), lastColor: "purple" as const, highlightPalette: ["#123456" as const] };
+  expect(initialHighlightColor(lib)).toBe("#123456");
+  expect(highlightPalette(lib)).toEqual(["#123456"]);
+  expect(lib.lastColor).toBe("purple");
+  expect(highlightPalette(emptyLibrary())).toHaveLength(3);
+});
 async function fixture(): Promise<Page> {
   const url = "https://example.com/article?q=1";
   const id = await pageId(url);

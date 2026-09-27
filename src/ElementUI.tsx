@@ -1,5 +1,6 @@
+import { colorInfo } from "./model";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { COLORS, type Color } from "./model";
+import { type Color } from "./model";
 import { Icon } from "./Icon";
 import { elementBox, elementChain, elementName, type ElementBox } from "./element-anchors";
 
@@ -58,7 +59,7 @@ export function ElementOverlays({ items, preview = false, focused, hovered = [],
       occupied.set(key, slot + 1);
       return <div key={item.id} data-element-mark={item.id}
         className={`element-outline${preview ? " is-preview" : ""}${focused === item.id ? " is-focused" : ""}`}
-        style={{ ...box, "--mark": COLORS[item.color].hex } as CSSProperties}>
+        style={{ ...box, "--mark": colorInfo(item.color).hex } as CSSProperties}>
         {edit && hovered.includes(item.id) && <button className="element-note-button" style={{ right: slot * 29 }}
           ref={item.id === primary ? buttonRef : undefined}
           aria-label={`编辑元素批注：${item.label ?? ""}`} title="编辑批注"

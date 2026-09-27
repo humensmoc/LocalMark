@@ -138,7 +138,7 @@ try {
     );
   });
   const host = page.locator("#local-web-clipper-root");
-  await host.getByLabel("高亮选中文字", { exact: true }).click();
+  await host.locator(".editor .swatch.selected").click();
   await until(
     async () => (await marks()).length === 1,
     "mark saved through page UI",
@@ -170,7 +170,7 @@ try {
   });
   await page.locator("#mwFw .immersive-translate-target-inner").click();
   await host.locator("#wc-note").fill("更新评论不重新定位原文");
-  await host.getByRole("button", { name: "确认保存", exact: true }).click();
+  await host.getByRole("button", { name: "保存", exact: true }).click();
   await until(async () => (await marks())[0].note === "更新评论不重新定位原文", "comment persisted");
   await host.locator(".editor").waitFor({ state: "detached" });
   await page.waitForTimeout(350); // Include the debounced file-sync notification.
@@ -296,21 +296,11 @@ try {
         }),
       );
     }, layout.html);
-    await host.getByLabel("高亮选中文字", { exact: true }).hover();
-    await host.locator(".editor .excerpt").waitFor();
-    assert.equal(
-      await host.locator(".editor .excerpt").textContent(),
-      layout.text,
-    );
-    assert.equal(
-      await host
-        .locator(".editor .excerpt")
-        .evaluate((e) => getComputedStyle(e).whiteSpace),
-      "pre-wrap",
-    );
+    await host.locator("#wc-note").click();
+    assert.equal(await host.locator(".composer-excerpt, .editor .excerpt").count(), 0);
     const comment = `评论第一行\n评论第二行：${"长内容".repeat(24)}\n\n评论末尾`;
     await host.locator("#wc-note").fill(comment);
-    await host.getByRole("button", { name: "确认保存", exact: true }).click();
+    await host.getByRole("button", { name: "保存", exact: true }).click();
     await until(
       async () => (await marks()).length === beforeCount + 1,
       "formatted quote saved",
@@ -362,7 +352,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: Chinese UI capture, comment-only save preserves highlights, persistence, original/dual attribute toggle, removal/reinsertion, changed wording, reload in both states, bilingual and ordinary excerpt line breaks in editor/storage, comment-only hover with line breaks, narrow layout, build version, no page errors.",
+    "PASS: Chinese UI capture, comment-only save preserves highlights, persistence, original/dual attribute toggle, removal/reinsertion, changed wording, reload in both states, bilingual and ordinary excerpt line breaks in storage, comment-only hover with line breaks, narrow layout, build version, no page errors.",
   );
 } finally {
   await context.close();

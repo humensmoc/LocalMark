@@ -50,6 +50,7 @@ export type Request =
       expectedTaxonomy?: string;
     }
   | { type: "snapshot"; refresh?: boolean }
+  | { type: "highlight-palette"; colors: Color[] }
   | { type: "show-page-tools"; enabled: boolean; tool?: PageTool }
   | { type: "auto-generate-markdown"; enabled: boolean }
   | {

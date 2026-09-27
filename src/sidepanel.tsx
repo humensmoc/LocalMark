@@ -1,7 +1,7 @@
+import { colorInfo } from "./model";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  COLORS,
   DEFAULT_CATEGORY,
   DEFAULT_CATEGORIES,
   canonicalUrl,
@@ -275,7 +275,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
     <article
       key={m.id}
       className="card current"
-      style={{ "--mark": COLORS[m.color].hex } as React.CSSProperties}
+      style={{ "--mark": colorInfo(m.color).hex } as React.CSSProperties}
     >
       {m.anchor.kind === "element" && <small className="element-kind">元素 · {m.anchor.tag}</small>}
       {p.url !== url && (
@@ -567,7 +567,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
                   <Icon name="pen" size={30} />
                   <p>可以只给网页评分、添加标签或评论。</p>
                   <small>需要摘录时，选中网页文字即可高亮。</small>
-                  <small>悬停高亮按钮可以添加批注。</small>
+                  <small>点击浮窗颜色保存，或直接输入批注后按 Enter。</small>
                 </div>
               )}
             </>

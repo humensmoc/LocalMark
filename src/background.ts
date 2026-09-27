@@ -5,6 +5,7 @@ import {
   pageId,
   folderName,
   MarkSchema,
+  HighlightPaletteSchema,
   PageSchema,
   PageTagsSchema,
   PageCommentSchema,
@@ -21,6 +22,7 @@ import { SyncEngine } from "./sync";
 import { mergeSyncResult } from "./sync-state";
 import { openSidePanelFromPage } from "./page-bridge";
 import { transcriptRequest } from "./video-transcript";
+import { gdcPlaybackRequest } from "./gdc-transcript";
 import type { Request } from "./protocol";
 import { prepareMetadataImport, validateImportBatch, type ImportRequest } from "./metadata-import";
 import { metadataFilePath } from "./metadata-names";
@@ -152,6 +154,14 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
   }
   const lib = await library();
   if (m.type === "snapshot") return lib;
+  if (m.type === "highlight-palette") {
+    if (sender.url !== chrome.runtime.getURL("settings.html"))
+      throw Error("请在设置中修改高亮颜色。");
+    lib.highlightPalette = HighlightPaletteSchema.parse(m.colors);
+    await db.set("library", lib);
+    void notify().catch(() => {});
+    return lib;
+  }
   if (m.type === "show-page-tools") {
     if (sender.url !== chrome.runtime.getURL("settings.html"))
       throw Error("请在设置中修改网页悬浮按钮开关。");
@@ -429,8 +439,13 @@ async function dispatch(m: Request | ImportRequest, sender: chrome.runtime.Messa
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (["changed", "page-updated"].includes(message?.type)) return false;
-  if (message?.type === "video-transcript") {
-    void transcriptRequest(message, sender).then(data => reply({ ok: true, data }),
+  // A liveness check must never enter the storage/filesystem queue.
+  if (message?.type === "video-transcript-ping") {
+    reply({ ok: true, version: chrome.runtime.getManifest().version });
+    return false;
+  }
+  if (message?.type === "video-transcript" || message?.type === "video-playback") {
+    void (message.type === "video-playback" ? gdcPlaybackRequest(message, sender) : transcriptRequest(message, sender)).then(data => reply({ ok: true, data }),
       error => reply({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
   }
