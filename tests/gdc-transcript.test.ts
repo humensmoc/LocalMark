@@ -146,7 +146,7 @@ describe("GDC Vault subtitles", () => {
       "error",
     );
   });
-  it("loads complete files, follows native language and seeks only the bound frame document", async () => {
+  it("loads complete files, follows native language and rebinds a new top document to its player frame", async () => {
     const frameUrl = "https://gdcvault.blazestreaming.com/?id=unit";
     const executeScript = vi.fn(async (request: any) =>
       request.func === gdcPageContext
@@ -202,12 +202,11 @@ describe("GDC Vault subtitles", () => {
       tabId: 90,
       documentIds: ["iframe-doc"],
     });
-    await expect(
-      gdcPlaybackRequest(
-        { key: "gdcvault:123", action: "seek", seconds: 10 },
-        { ...sender, documentId: "new-top" },
-      ),
-    ).rejects.toThrow("当前视频");
+    await expect(gdcPlaybackRequest(
+      { key: "gdcvault:123", action: "seek", seconds: 10 },
+      { ...sender, documentId: "new-top" },
+    )).resolves.toHaveProperty("currentTime", 10);
+    expect(executeScript.mock.calls.at(-1)![0].target).toEqual({ tabId: 90, documentIds: ["iframe-doc"] });
   });
   it("shows HTTP failures rather than treating missing fragments as a complete transcript", async () => {
     vi.stubGlobal("chrome", {

@@ -15,7 +15,7 @@ export async function deletePageData(entry: Entry, files: PageFiles, commit: () 
   if (md !== null && md !== entry.baseMd && !isGeneratedMarkdown(md, entry.page))
     throw Error("对应 Markdown 有手工修改，请先备份或移走该文件后重试。");
   const images = [] as { path: string; data: Blob }[];
-  for (const mark of entry.page.videoMarks ?? []) {
+  for (const mark of [...entry.page.annotations, ...(entry.page.videoMarks ?? [])]) {
     if (!mark.imagePath) continue;
     if (!new RegExp(`^media/${id}/[a-f0-9-]+\\.png$`).test(mark.imagePath))
       throw Error("截图文件路径异常，已暂停删除。");

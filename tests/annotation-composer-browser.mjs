@@ -146,6 +146,8 @@ try {
   await page.reload(); await page.locator("#local-web-clipper-root").waitFor(); await reveal(page);
   await until(() => page.evaluate(() => CSS.highlights.has("wc-hex-123456")));
   assert.equal(await page.locator("#repeat-a").evaluate(el => getComputedStyle(el, "::highlight(wc-hex-123456)").backgroundColor), "rgb(18, 52, 86)");
+  assert.equal(await page.locator("#repeat-a").evaluate(el => getComputedStyle(el, "::highlight(wc-note-hex-123456)").textDecorationStyle), "wavy");
+  assert.equal(await page.evaluate(() => [...CSS.highlights.get("wc-note-hex-123456")].length), 0);
   assert.equal((await marks())[0].color, "pink");
   ok("custom color and one-color palette apply live, persist after reload, and render without changing older highlights");
 

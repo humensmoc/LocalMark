@@ -84,6 +84,10 @@ export function TranscriptParagraphs({
         setHoveredCommentId(id => id === mark.id ? null : id);
     },
   });
+  function clickCommentCard(mark: VideoMark, event: React.MouseEvent<HTMLElement>) {
+    if ((event.target as Element).closest("button") || window.getSelection()?.toString().trim()) return;
+    onMarkerSeek(mark.time);
+  }
   function hide() {
     keep();
     hovered.current = null;
@@ -123,7 +127,7 @@ export function TranscriptParagraphs({
     document.addEventListener("mouseup", finish, { once: true });
   }
   function showPreview(mark: VideoMark, event: React.MouseEvent<HTMLElement>) {
-    if (mark.kind !== "screenshot") setPreview({ mark, x: event.clientX, y: event.clientY });
+    if (mark.kind === "keyframe") setPreview({ mark, x: event.clientX, y: event.clientY });
   }
   function position() {
     if (!popup.current || !hovered.current) return;
@@ -282,7 +286,7 @@ export function TranscriptParagraphs({
                   {((annotations.ending.get(item.index)?.length ?? 0) > 0 || (annotations.points.get(item.index)?.length ?? 0) > 0) && (
                     <span className="cue-inserts">
                       {annotations.ending.get(item.index)?.filter(mark => mark.note.trim()).map(mark => (
-                        <span key={mark.id} className="cue-note" data-mark-id={mark.id} style={{ "--annotation": colorInfo(mark.color).hex } as React.CSSProperties} {...commentHoverProps(mark)}>
+                        <span key={mark.id} className="cue-note" data-mark-id={mark.id} style={{ "--annotation": colorInfo(mark.color).hex } as React.CSSProperties} {...commentHoverProps(mark)} onClick={event => clickCommentCard(mark, event)}>
                           <button type="button" className="cue-note-jump" title={`跳转到 ${subtitleTime(mark.time)} 并暂停`} onClick={() => onMarkerSeek(mark.time)}>{mark.note}</button>
                           <button type="button" className="cue-note-edit" onClick={e => onEdit(mark, e.clientX, e.clientY)} aria-label="编辑字幕批注"><Icon name="pen" size={13} /></button>
                         </span>
@@ -291,8 +295,8 @@ export function TranscriptParagraphs({
                         <span className="cue-timeline" aria-label="字幕时间点">
                           {annotations.points.get(item.index)!.slice().sort((a, b) => a.time - b.time).map(mark => {
                             return <span key={mark.id} className={`cue-marker${hoveredCommentId === mark.id ? " comment-hovered" : ""}`} data-mark-id={mark.id}>
-                              <button type="button" aria-label={`${mark.kind === "screenshot" ? "截图" : "关键帧"} ${subtitleTime(mark.time)}，跳转视频`} onMouseEnter={e => showPreview(mark, e)} onMouseLeave={() => setPreview(null)} onClick={() => onMarkerSeek(mark.time)}>
-                                {mark.kind === "screenshot" ? <ScreenshotImage mark={mark} size="timeline" /> : <Icon name="bookmark" size={15} />}
+                              <button type="button" aria-label={`${mark.kind === "screenshot" ? "截图" : mark.kind === "comment" ? "视频评论" : "关键帧"} ${subtitleTime(mark.time)}，跳转视频`} onMouseEnter={e => showPreview(mark, e)} onMouseLeave={() => setPreview(null)} onClick={() => onMarkerSeek(mark.time)}>
+                                {mark.kind === "screenshot" ? <ScreenshotImage mark={mark} size="timeline" /> : <Icon name={mark.kind === "comment" ? "comment" : "bookmark"} size={15} />}
                               </button>
                               <button type="button" className="marker-edit" aria-label="编辑时间点标注" onClick={e => onEdit(mark, e.clientX, e.clientY)}><Icon name="pen" size={12} /></button>
                             </span>;
@@ -301,12 +305,9 @@ export function TranscriptParagraphs({
                       )}
                       {annotations.points.get(item.index)?.filter(mark => mark.note.trim()).map(mark => (
                         <span key={mark.id} className="cue-note point-note" data-mark-id={mark.id} style={{ "--annotation": colorInfo(mark.color).hex } as React.CSSProperties} {...commentHoverProps(mark)}
-                          onClick={event => {
-                            if ((event.target as Element).closest("button") || window.getSelection()?.toString().trim()) return;
-                            onMarkerSeek(mark.time);
-                          }}>
-                          <span className="cue-note-heading" aria-label={mark.kind === "screenshot" ? "截图" : "关键帧"}>
-                            {mark.kind === "screenshot" ? <ScreenshotImage mark={mark} size="comment" /> : <Icon name="bookmark" size={15} />}
+                          onClick={event => clickCommentCard(mark, event)}>
+                          <span className="cue-note-heading" aria-label={mark.kind === "screenshot" ? "截图" : mark.kind === "comment" ? "视频评论" : "关键帧"}>
+                            {mark.kind === "screenshot" ? <ScreenshotImage mark={mark} size="comment" /> : <Icon name={mark.kind === "comment" ? "comment" : "bookmark"} size={15} />}
                             <strong>{subtitleTime(mark.time)}</strong>
                           </span> <button type="button" className="cue-note-jump" title={`跳转到 ${subtitleTime(mark.time)} 并暂停`} onClick={() => onMarkerSeek(mark.time)}>{mark.note}</button>
                         </span>

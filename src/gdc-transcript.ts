@@ -230,7 +230,7 @@ export function gdcPlayerAction(
           seconds < 0 ||
           (Number.isFinite(video.duration) && seconds > video.duration)
         )
-          return { error: "字幕时间超出当前视频范围。" };
+          return { error: "目标时间超出当前视频范围。" };
         w.__localmarkGdcPauseCleanup?.();
         const pause = () => {
           video.pause();
@@ -432,16 +432,26 @@ export async function gdcPlaybackRequest(
   message: { key: string; action: "state" | "seek" | "freeze" | "resume"; seconds?: number },
   sender: chrome.runtime.MessageSender,
 ) {
-  const tabId = validateSender(sender, message.key),
-    binding = bindings.get(tabId);
-  if (
-    !binding ||
-    binding.key !== message.key ||
-    binding.topDocumentId !== sender.documentId
-  )
-    throw Error("请先加载当前视频字幕。");
+  const tabId = validateSender(sender, message.key);
   if (!["state", "seek", "freeze", "resume"].includes(message.action))
     throw Error("无效的播放器操作。");
+  let binding = bindings.get(tabId);
+  if (!binding || binding.key !== message.key || binding.topDocumentId !== sender.documentId) {
+    if (message.action === "resume") throw Error("播放器绑定已失效，请重试截图。");
+    const { frameUrl } = await context(sender, message.key);
+    const described = await transcriptDeadline(chrome.scripting.executeScript({
+      target: { tabId, allFrames: true }, world: "MAIN", injectImmediately: true,
+      func: gdcPlayerAction, args: [frameUrl, "describe"],
+    }), 5000, "读取 GDC Vault 播放器超时，请重试。");
+    const frame = described.find(result => result.result);
+    const info = frame?.result;
+    if (!frame?.documentId || !info || "error" in info || !info.source)
+      throw Error(info && "error" in info ? info.error : "播放器尚未准备好，请等待视频加载后重试。");
+    binding = { key: message.key, topDocumentId: sender.documentId,
+      documentId: frame.documentId, frameUrl, source: info.source };
+    bindings.set(tabId, binding);
+    while (bindings.size > 30) bindings.delete(bindings.keys().next().value!);
+  }
   if (message.action === "seek") {
     const ctx = await context(sender, message.key);
     if (ctx.frameUrl !== binding.frameUrl)
@@ -450,7 +460,7 @@ export async function gdcPlaybackRequest(
       typeof message.seconds !== "number" ||
       !Number.isFinite(message.seconds)
     )
-      throw Error("无效的字幕时间。");
+      throw Error("无效的视频时间。");
   }
   const results = await transcriptDeadline(
     chrome.scripting
@@ -468,7 +478,7 @@ export async function gdcPlaybackRequest(
       })
       .catch(() => {
         throw Error(
-          "无法访问播放器页面，它可能已重新加载。请重新加载字幕后再试。",
+          "无法访问播放器页面，它可能已重新加载。请刷新网页后重试。",
         );
       }),
     5000,
@@ -476,6 +486,6 @@ export async function gdcPlaybackRequest(
   );
   const result = results[0]?.result;
   if (!result || "error" in result)
-    throw Error(result?.error || "播放器已关闭或切换，请重新加载字幕。");
+    throw Error(result?.error || "播放器已关闭或切换，请刷新网页后重试。");
   return result;
 }

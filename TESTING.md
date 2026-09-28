@@ -1,5 +1,38 @@
 # 验证记录
 
+## 0.3.31 译文隐藏提示取消与评论波浪线（2026-09-28）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 与页面构建版本均为 0.3.31。
+- `npm test -- --run tests/translation.test.ts tests/anchors-performance.test.ts`：2 文件、23 项通过；混合英文与隐藏译文选区只绘制英文精确高亮及评论波浪线，段落近似定位状态仍保留。
+- `node tests/translation-browser.mjs` 逐项重试通过：隐藏或改写中文译文时无 `wc-context-*` 正文标记；有评论的精确高亮为波浪线，清空后消失，再添加后恢复。查看 `test-results/translation-original.png`、`translation-dual.png`、`translation-mixed-comment-folded.png`，页面没有未捕获错误。
+- `node tests/annotation-composer-browser.mjs` 逐项重试通过，自定义颜色波浪线规则与浮窗交互正常。两项浏览器检查首次并行运行时均在导航阶段超时，未进入样式断言；分开运行后通过。测试均使用隔离模拟网页，用户实际页面待重载复核。
+
+## 0.3.29 折叠译文与评论高亮重叠（2026-09-28）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 及页面构建版本均为 0.3.29。`git diff --check` 无空白错误。
+- `npm test -- --run tests/translation.test.ts tests/anchors-performance.test.ts`：2 文件、23 项通过；新增混合选区覆盖英文精确片段与隐藏中文译文对应段落，检查精确背景、评论虚线和折叠提示的范围互斥。
+- `node tests/translation-browser.mjs`：按用户截图的英文段落构造同时选中部分英文与中文译文且带评论的标注，隐藏译文后核对波浪提示只在未精确高亮部分；精确高亮及评论下划线仍在选区，两个 Highlight 范围无交集。已查看 `test-results/translation-mixed-comment-folded.png`；原译文显隐、改写、评论清空/恢复、英文高亮、窄屏与持久化回归通过，`pageerror=[]`。使用隔离模拟网页，用户当前页面待重载复核。
+
+## 0.3.27 评论高亮与折叠译文样式（2026-09-28）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 均为 0.3.27，内容脚本内嵌版本同步；`git diff --check` 无空白错误。
+- `npm test -- --run tests/translation.test.ts tests/anchors-performance.test.ts`：2 文件、22 项通过，保留译文锚点及评论改动时复用原 Range 的验证。
+- `node tests/translation-browser.mjs`：双语中文精确高亮在有评论时保持底色并出现虚线；清空评论后虚线消失，再次添加后恢复且底层 Highlight 对象不换。隐藏译文时原文整段变为浅底色与波浪线，译文恢复后重回精确高亮；译文移除/重插/改写、普通英文评论高亮、刷新与 420px 宽度通过，`pageerror=[]`。已查看 `test-results/translation-dual.png`、`translation-original.png` 与 `translation-changed-narrow.png`。
+- `node tests/annotation-composer-browser.mjs`：自定义色的新下划线规则、旧标注编辑、浮窗交互和 320px 布局通过。测试均为隔离模拟网页；未在用户当前网页核实扩展重载后的实际版本。
+
+## 0.3.25 字幕长按持续居中（2026-09-28）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 均为 0.3.25，内容脚本内嵌版本为 v0.3.25；`git diff --check` 无空白错误。
+- `node tests/video-transcript-browser.mjs` 通过：Bilibili 模拟播放器下，按住约 0.8 秒时环形进度部分填充，提前松开不进入跟随；长按 2 秒开启，首条、中间和末条字幕随播放时间滚动到中央，第二次长按退出后停止自动滚动。键盘空格长按也可进入和退出。Bilibili/YouTube 原单击定位、字幕加载、时间跳转、窄屏和 SPA/SSR 回归通过。唯一 console 403 来自测试故意模拟的 YouTube 请求失败。
+- `node tests/gdc-transcript-browser.mjs` 通过：GDC Vault iframe 播放时间变化后字幕自动居中，第二次长按退出；原字幕读取、时间跳转、截图和 iframe 回归通过，`errors=[]`。已查看 `test-results/video-transcript/bilibili-following.png` 的跟随按钮与首条字幕居中布局。以上均使用隔离模拟网页，用户当前 Bilibili 页面是否已重载并显示 v0.3.25 尚未核实。
+
+## 0.3.20 无字幕视频时间点标注（2026-09-28）
+
+- `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 均为 0.3.20，页面内嵌构建版本同步；`git diff --check` 通过。
+- `npm test`：24 个文件、248 项通过，覆盖 v4 视频标注读取、v5 独立评论与无字幕时间点、v5 元数据导入及 Markdown 输出。
+- `node tests/no-subtitle-video-browser.mjs`：YouTube、Bilibili、GDC Vault 均在无可用字幕时保存截图、关键帧和独立评论；编辑、删除、侧栏跳转、精确暂停、字幕恢复后的句子归属、320px 无横向溢出通过。YouTube 另测字幕仍在加载时截图、播放器未就绪、资料目录断开及本地图片写入失败，失败时不新增标注；v5 JSON/Markdown 写入核对通过。已查看三站窄屏截图；pageerror=[]。
+- `node tests/video-annotations-browser.mjs`、`node tests/video-transcript-browser.mjs`、`node tests/gdc-transcript-browser.mjs` 原字幕标注与三站字幕流程回归通过。YouTube 字幕回归中的 HTTP 403 是测试故意模拟的请求失败；GDC 与视频标注专项无未捕获页面错误。均使用隔离模拟网页和资料目录，未在用户当前页面核实新版加载情况。
+
 ## 0.3.18 字幕左侧时间列收窄（2026-09-27）
 
 - `npm run build` 含 TypeScript 通过；package、lock 顶层/根包、public/dist manifest 与页面内嵌版本为 0.3.18，`git diff --check` 通过。

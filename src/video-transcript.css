@@ -167,10 +167,21 @@ header {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
+.body.following {
+  padding-block: max(0px, calc(min(480px, 60vh) / 2 - 1em));
+}
 .body-shell { position: relative; padding-left: 14px; }
 .annotation-rail { position: absolute; top: 0; bottom: 0; left: 1px; width: 13px; z-index: 2; pointer-events: none; }
 .annotation-rail button { position: absolute; left: 1px; width: 10px; height: 5px; padding: 0; border: 0; border-radius: 3px; box-shadow: 0 0 0 1px #0005; pointer-events: auto; }
 .annotation-rail button:hover, .annotation-rail button:focus-visible { width: 13px; height: 9px; left: 0; }
+.video-point-list { display: grid; gap: 6px; padding: 0 8px 9px; }
+.video-point-card { display: flex; align-items: flex-start; gap: 4px; min-width: 0; border-left: 3px solid var(--annotation); border-radius: 4px; background: var(--hover); }
+.video-point-jump { display: grid; gap: 3px; flex: 1; min-width: 0; border: 0; background: transparent; text-align: left; padding: 5px 6px; }
+.video-point-heading { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--blue); font-size: 11px; }
+.video-point-quote, .video-point-note { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.video-point-quote { color: var(--muted); }
+.video-point-card > .video-point-edit, .video-point-card > .video-point-delete { flex: none; border: 0; background: transparent; padding: 5px 4px; color: var(--muted); }
+.video-point-card > .video-point-delete { color: #c65050; }
 .subtitle-paragraph {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -224,11 +235,10 @@ header {
   --cue-current-band: var(--active);
 }
 .cue.annotated {
-  --cue-annotation-band: var(--annotation);
+  --cue-highlight-base: var(--annotation);
 }
 .cue-inserts { display: block; margin: 4px 0 7px; }
-.cue-note { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: 3px 0; padding: 4px 7px; border-left: 3px solid var(--annotation); background: var(--hover); border-radius: 3px; }
-.cue-note.point-note { cursor: pointer; }
+.cue-note { display: block; white-space: pre-wrap; overflow-wrap: anywhere; margin: 3px 0; padding: 4px 7px; border-left: 3px solid var(--annotation); background: var(--hover); border-radius: 3px; cursor: pointer; }
 .cue-note-heading { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; margin-right: 3px; }
 .cue-note .cue-note-jump { display: inline; border: 0; background: transparent; color: inherit; padding: 0; text-align: left; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; cursor: pointer; }
 .cue-note .cue-note-jump:hover { text-decoration: underline; }
@@ -249,6 +259,12 @@ header {
 .marker-preview p { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .video-quick-tools { display: flex; align-items: flex-start; gap: 3px; padding: 5px 8px 4px; border-top: 1px solid var(--border); }
 .video-quick-tools > .icon-button { width: 25px; height: 29px; }
+.locate-button { position: relative; touch-action: none; user-select: none; }
+.locate-button.following { color: var(--blue); background: var(--chip); }
+.locate-progress { position: absolute; inset: 0; width: 25px; height: 29px; overflow: visible; transform: rotate(-90deg); pointer-events: none; }
+.locate-progress circle { fill: none; stroke: var(--blue); stroke-width: 1.8; stroke-dasharray: 69.12; stroke-dashoffset: 0; }
+.locate-button.holding .locate-progress circle { stroke-dashoffset: 69.12; animation: locate-hold-progress 2s linear forwards; }
+@keyframes locate-hold-progress { to { stroke-dashoffset: 0; } }
 .quick-input { position: relative; flex: 1; min-width: 0; }
 .quick-input textarea { display: block; width: 100%; height: 30px; min-height: 30px; resize: none; padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--input); color: var(--fg); font: 12px/1.5 Arial,"Microsoft YaHei",sans-serif; }
 .quick-input.expanded textarea { height: 100px; min-height: 70px; resize: vertical; padding-right: 50px; }
@@ -301,6 +317,13 @@ header {
   font-size: 12px;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
+}
+.cue-time-button:hover,
+.cue-time-button:focus-visible {
+  background: var(--chip);
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px var(--blue), 0 4px 12px #0004;
+  text-decoration: underline;
 }
 .message {
   padding: 16px;

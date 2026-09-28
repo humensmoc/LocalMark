@@ -23,8 +23,8 @@
   color: #18211c;
   text-decoration: underline;
 }
-::highlight(wc-context-yellow) { text-decoration: underline dashed #ad7800; }
-::highlight(wc-context-green) { text-decoration: underline dashed #278254; }
-::highlight(wc-context-blue) { text-decoration: underline dashed #237cad; }
-::highlight(wc-context-pink) { text-decoration: underline dashed #b94786; }
-::highlight(wc-context-purple) { text-decoration: underline dashed #8259b8; }
+::highlight(wc-note-yellow) { text-decoration: underline wavy #ad7800; }
+::highlight(wc-note-green) { text-decoration: underline wavy #278254; }
+::highlight(wc-note-blue) { text-decoration: underline wavy #237cad; }
+::highlight(wc-note-pink) { text-decoration: underline wavy #b94786; }
+::highlight(wc-note-purple) { text-decoration: underline wavy #8259b8; }

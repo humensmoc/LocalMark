@@ -74,3 +74,17 @@ await build({
     },
   },
 });
+await build({
+  configFile: false,
+  publicDir: false,
+  build: {
+    outDir: "dist",
+    emptyOutDir: false,
+    lib: {
+      entry: resolve("src/video-keyboard-guard.ts"),
+      name: "LocalMarkVideoKeyboardGuard",
+      formats: ["iife"],
+      fileName: () => "video-keyboard-guard.js",
+    },
+  },
+});

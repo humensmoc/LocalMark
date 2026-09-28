@@ -79,6 +79,9 @@ function App() {
   const paintKey = useMemo(() => JSON.stringify(current?.annotations.map(
     ({ id, anchor, text, color }) => [id, anchor, text, color],
   )), [current]);
+  const commentKey = useMemo(() => JSON.stringify(current?.annotations.map(
+    ({ id, note }) => [id, !!note.trim()],
+  )), [current]);
   const snapshot = useRef({ lib, current, draft, rebind, url, picking, marksVisible });
   snapshot.current = { lib, current, draft, rebind, url, picking, marksVisible };
   const refreshGeneration = useRef(0),
@@ -438,6 +441,9 @@ function App() {
     publish();
     setGeometry((v) => v + 1);
   }, [url, paintKey, marksVisible]);
+  useEffect(() => {
+    painter.updateCommentIndicators(current?.annotations ?? []);
+  }, [url, commentKey]);
   const edit = (m: Mark, x = innerWidth / 2 - 160, y = 100) => {
     clearTimeout(hoverTimer.current);
     setError("");
@@ -487,6 +493,8 @@ function App() {
         favicon:
           document.querySelector<HTMLLinkElement>('link[rel~="icon"]')?.href ??
           "",
+        imageSource: d.validateElement && d.element instanceof HTMLImageElement
+          ? d.element.currentSrc || d.element.src : undefined,
         mark: {
           id: d.id,
           expectedUpdatedAt: d.expectedUpdatedAt,

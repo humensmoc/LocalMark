@@ -231,6 +231,64 @@ try {
   assert.equal(await firstCard.locator(".rating-dots .filled").count(), 3);
   assert.equal((await firstCard.boundingBox()).height, originalCardHeight);
   await page.screenshot({ path: join(out, "rating-dashboard.png"), fullPage: true });
+  await secondCard.getByRole("button", { name: "Idle 游戏分类学", exact: true }).click();
+  await detail.getByRole("button", { name: "5 星", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".dashboard-detail .rating-value")?.textContent === "5 / 5");
+  await firstCard.getByRole("button", { name: first, exact: true }).click();
+  const ratingFilters = list.getByRole("group", { name: "评分筛选" });
+  assert.equal(await ratingFilters.getByRole("button").count(), 7, "rating filter shows all, unrated and five star values");
+  const ratingColors = ["", "rgb(240, 128, 128)", "rgb(238, 160, 91)", "rgb(228, 196, 92)", "rgb(96, 198, 163)", "rgb(185, 154, 242)"];
+  for (const rating of [1, 2, 3, 4, 5]) {
+    const option = ratingFilters.getByRole("button", { name: `${rating} 星`, exact: true });
+    assert.equal(await option.locator(".rating-filter-stars svg").count(), rating);
+    assert.equal(await option.locator(".rating-filter-stars").evaluate(node => getComputedStyle(node).color), ratingColors[rating]);
+  }
+  const unrated = ratingFilters.getByRole("button", { name: "未评分", exact: true });
+  assert.equal(await unrated.locator(".rating-filter-stars svg").count(), 5);
+  assert.equal(await unrated.locator(".rating-filter-stars svg").first().evaluate(node => getComputedStyle(node).fill), "none");
+  const score3 = ratingFilters.getByRole("button", { name: "3 星", exact: true });
+  const score5 = ratingFilters.getByRole("button", { name: "5 星", exact: true });
+  await score3.click();
+  assert.equal(await list.locator(".result-card").count(), 1);
+  assert.equal(await firstCard.count(), 1);
+  await score5.click();
+  assert.equal(await score3.getAttribute("aria-pressed"), "true");
+  assert.equal(await score5.getAttribute("aria-pressed"), "true");
+  assert.equal(await list.locator(".result-card").count(), 2);
+  await page.screenshot({ path: join(out, "rating-filter-multiselect.png"), fullPage: true });
+  await score3.click();
+  assert.equal(await secondCard.count(), 1);
+  assert.equal(await firstCard.count(), 0);
+  await unrated.click();
+  assert.equal(await list.locator(".result-card").count(), 3);
+  await score5.click();
+  assert.equal(await list.locator(".result-card").count(), 2);
+  await ratingFilters.getByRole("button", { name: "全部", exact: true }).click();
+  assert.equal(await list.locator(".result-card").count(), 4);
+  for (const rating of [1, 2, 4]) {
+    const option = ratingFilters.getByRole("button", { name: `${rating} 星`, exact: true });
+    await option.click();
+    assert.equal(await option.getAttribute("aria-pressed"), "true");
+    assert.equal(await list.locator(".result-card").count(), 0);
+    await option.click();
+  }
+  await score3.click();
+  await score5.click();
+  const categoryFilters = list.getByRole("group", { name: "主分类筛选" });
+  await categoryFilters.getByRole("button", { name: /^游戏设计/ }).click();
+  assert.equal(await list.locator(".result-card").count(), 2);
+  await list.getByRole("group", { name: "小标签筛选" }).getByRole("button", { name: /^设计方法论/ }).click();
+  assert.equal(await list.locator(".result-card").count(), 2);
+  await list.getByRole("group", { name: "小标签筛选" }).getByRole("button", { name: /^成长系统/ }).click();
+  assert.equal(await firstCard.count(), 1);
+  assert.equal(await secondCard.count(), 0);
+  await list.getByRole("region", { name: "网页筛选条件" }).getByRole("button", { name: "清空筛选" }).click();
+  assert.equal(await list.locator(".result-card").count(), 4);
+  assert.equal(await ratingFilters.getByRole("button", { name: "全部", exact: true }).getAttribute("aria-pressed"), "true");
+  await secondCard.getByRole("button", { name: "Idle 游戏分类学", exact: true }).click();
+  await detail.locator(".rating-clear").click();
+  await page.waitForFunction(() => document.querySelector(".dashboard-detail .rating-value")?.textContent === "未评分");
+  ok("rating chips show color-coded stars, allow multiple scores and unrated, and combine with category and tags");
   await page.reload();
   await firstCard.getByRole("button", { name: first, exact: true }).click();
   await detail.getByRole("button", { name: "3 星", exact: true }).waitFor();
@@ -432,7 +490,7 @@ try {
         ?.textContent === "交互设计",
   );
   ok("article tags and main category are editable in place");
-  const filterPanel = page.getByRole("region", { name: "标签筛选条件" });
+  const filterPanel = page.getByRole("region", { name: "网页筛选条件" });
   await filterPanel.getByRole("button", { name: /待复核/ }).click();
   assert.equal(await list.locator(".result-card").count(), 1);
   await filterPanel.getByRole("button", { name: "清空筛选" }).click();

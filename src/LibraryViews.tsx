@@ -1,7 +1,7 @@
 import { colorInfo } from "./model";
 import { useState, type CSSProperties } from "react";
 import { COLORS, type Color, type Library, type Page, type Mark, type VideoMark } from "./model";
-import { ScreenshotGallery } from "./ScreenshotImage";
+import { SavedImage, ScreenshotGallery } from "./ScreenshotImage";
 import { Icon } from "./Icon";
 import { SiteIcon } from "./SiteIcon";
 import { RatingDots } from "./PageRating";
@@ -13,7 +13,7 @@ import { GroupedContent } from "./GroupedContent";
 import { PageCard } from "./PageCard";
 
 export const LIBRARY_VIEWS = [
-  { id: "pages", label: "网页", icon: "page", hint: "按主分类与子标签筛选收藏，在右侧阅读和编辑。" },
+  { id: "pages", label: "网页", icon: "page", hint: "按主分类、评分与子标签筛选收藏，在右侧阅读和编辑。" },
   { id: "categories", label: "主分类", icon: "folder", hint: "梳理收藏的大方向，记录每个分类的含义与收录边界。" },
   { id: "tags", label: "子标签", icon: "tag", hint: "用可跨主分类复用的标签，连接相似的主题与想法。" },
   { id: "highlights", label: "高亮内容", icon: "pen", hint: "按网页分组阅读高亮摘录与对应批注。" },
@@ -96,10 +96,11 @@ function ContentTags({ page }: { page: Page }) {
 export function HighlightCard({ page, mark, open, showSource = true }: { page: Page; mark: Mark | VideoMark; open: (p: Page) => void; showSource?: boolean }) {
   return <article className="content-card" data-mark-id={mark.id} style={{ "--mark": colorInfo(mark.color).hex } as CSSProperties}>
     {"kind" in mark && mark.kind === "screenshot" && <ScreenshotGallery marks={[mark]} />}
+    {!("kind" in mark) && mark.imagePath && <div className="screenshot-gallery" aria-label="已保存的网页图片"><SavedImage mark={mark} /></div>}
     <div className="content-card-body" tabIndex={0} role="region" aria-label="高亮和批注内容">
-      {"kind" in mark ? <small className="element-kind">{mark.kind === "subtitle" ? "字幕" : mark.kind === "screenshot" ? "截图" : "关键帧"} · {Math.floor(mark.time / 60)}:{String(Math.floor(mark.time) % 60).padStart(2, "0")}</small>
+      {"kind" in mark ? <small className="element-kind">{mark.kind === "subtitle" ? "字幕" : mark.kind === "screenshot" ? "截图" : mark.kind === "comment" ? "视频评论" : "关键帧"} · {Math.floor(mark.time / 60)}:{String(Math.floor(mark.time) % 60).padStart(2, "0")}</small>
         : mark.anchor.kind === "element" && <small className="element-kind">元素 · {mark.anchor.tag}</small>}
-      {(!("kind" in mark) || mark.kind !== "screenshot") && <blockquote>{mark.text}</blockquote>}
+      {mark.text && (!("kind" in mark) || mark.kind !== "screenshot") && <blockquote>{mark.text}</blockquote>}
       {mark.note.trim() && <div className="content-note"><p>{mark.note}</p></div>}
     </div>
     {showSource && <><ContentTags page={page} /><Source page={page} open={open} date={mark.updatedAt} /></>}

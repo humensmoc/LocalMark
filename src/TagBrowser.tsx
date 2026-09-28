@@ -27,6 +27,7 @@ export function TagBrowser({
   selectionControls,
   navigation,
   sidebarFooter,
+  showRatingFilter = false,
 }: {
   pages: Page[];
   categories: string[];
@@ -44,6 +45,7 @@ export function TagBrowser({
   selectionControls?: (summary: ReactNode) => ReactNode;
   navigation?: ReactNode;
   sidebarFooter?: ReactNode;
+  showRatingFilter?: boolean;
 }) {
   const resultsRef = useRef<HTMLDivElement>(null);
   const searched = pages.filter((p) => matches(p));
@@ -58,6 +60,7 @@ export function TagBrowser({
       {filterDivider}
       <TagFilters pages={pages} categories={categories} tags={tags} filter={filter}
         change={change} matches={matches} taxonomy={taxonomy}
+        showRating={showRatingFilter}
         storageKey={navigation ? "localmark.filters.dashboard.pages" : "localmark.filters.sidepanel.tags"} />
       {selectionControls ? selectionControls(<b role="status">{results.length} 个网页</b>) : <div className="result-heading">
         <b role="status">{results.length} 个网页</b>
@@ -74,7 +77,7 @@ export function TagBrowser({
             <p>{pages.length ? "没有符合条件的网页" : "尚未保存网页"}</p>
             <small>
               {pages.length
-                ? "试试取消部分标签，或调整搜索词。"
+                ? "试试取消部分筛选条件，或调整搜索词。"
                 : "在当前页面添加分类、标签或评论后，即可在这里筛选。"}
             </small>
           </div>

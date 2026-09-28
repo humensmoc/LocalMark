@@ -1,22 +1,29 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { Page, Taxonomy } from "./model";
 import { Icon } from "./Icon";
+import { RatingFilterStars } from "./PageRating";
 
-export type TagFilter = { category: string; tags: string[] };
+export type RatingFilter = 1 | 2 | 3 | 4 | 5 | "unrated";
+export type TagFilter = { category: string; tags: string[]; ratings?: RatingFilter[] };
+
+const ratingSteps = [1, 2, 3, 4, 5] as const;
+const matchesRating = (page: Page, ratings: readonly RatingFilter[] = []) =>
+  !ratings.length || ratings.some(rating => rating === "unrated" ? page.rating === undefined : page.rating === rating);
 
 export function matchesTagFilter(page: Page, filter: TagFilter, taxonomy?: Taxonomy) {
   return (!filter.category || (taxonomy ? page.categoryId : page.category) === filter.category)
-    && filter.tags.every(tag => (taxonomy ? page.tagIds ?? [] : page.tags).includes(tag));
+    && filter.tags.every(tag => (taxonomy ? page.tagIds ?? [] : page.tags).includes(tag))
+    && matchesRating(page, filter.ratings);
 }
 
 const defaultHeight = 180;
 const minimumHeight = 84;
 const clamp = (height: number, max: number) => Math.max(minimumHeight, Math.min(height, max));
 
-export function TagFilters({ pages, categories, tags, filter, change, matches, taxonomy, storageKey, title = "筛选网页" }: {
+export function TagFilters({ pages, categories, tags, filter, change, matches, taxonomy, storageKey, title = "筛选网页", showRating = false }: {
   pages: Page[]; categories: string[]; tags: string[]; filter: TagFilter;
   change: (value: TagFilter) => void; matches: (page: Page) => boolean;
-  taxonomy?: Taxonomy; storageKey: string; title?: string;
+  taxonomy?: Taxonomy; storageKey: string; title?: string; showRating?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
   const heading = useRef<HTMLDivElement>(null);
@@ -71,24 +78,33 @@ export function TagFilters({ pages, categories, tags, filter, change, matches, t
   const tagIds = (page: Page) => taxonomy ? page.tagIds ?? [] : page.tags;
   const categoryName = (id: string) => taxonomy?.categories.find(item => item.id === id)?.name ?? id;
   const tagName = (id: string) => taxonomy?.tags.find(item => item.id === id)?.name ?? id;
+  const selectedRatings = filter.ratings ?? [];
   const searched = pages.filter(matches);
   const results = searched.filter(page => matchesTagFilter(page, filter, taxonomy));
   const categoryOptions = [...new Set([...(taxonomy?.categories.map(item => item.id) ?? categories), ...(filter.category ? [filter.category] : [])])]
-    .map(id => ({ id, count: searched.filter(page => categoryId(page) === id && filter.tags.every(tag => tagIds(page).includes(tag))).length }))
+    .map(id => ({ id, count: searched.filter(page => categoryId(page) === id && filter.tags.every(tag => tagIds(page).includes(tag)) && matchesRating(page, selectedRatings)).length }))
     .filter(item => item.count > 0 || item.id === filter.category);
+  const ratingCandidates = searched.filter(page => (!filter.category || categoryId(page) === filter.category)
+    && filter.tags.every(tag => tagIds(page).includes(tag)));
   const tagOptions = [...new Set([...(taxonomy?.tags.map(item => item.id) ?? tags), ...filter.tags])]
     .map(id => ({ id, count: results.filter(page => tagIds(page).includes(id)).length }))
     .filter(item => item.count > 0 || filter.tags.includes(item.id));
-  const activeCount = Number(!!filter.category) + filter.tags.length;
-  const selectedNames = [...(filter.category ? [categoryName(filter.category)] : []), ...filter.tags.map(tagName)].join("、");
+  const activeCount = Number(!!filter.category) + filter.tags.length + selectedRatings.length;
+  const selectedNames = [...(filter.category ? [categoryName(filter.category)] : []),
+    ...selectedRatings.map(rating => rating === "unrated" ? "未评分" : `${rating} 星`),
+    ...filter.tags.map(tagName)].join("、");
+  function toggleRating(rating: RatingFilter) {
+    change({ ...filter, ratings: selectedRatings.includes(rating)
+      ? selectedRatings.filter(value => value !== rating) : [...selectedRatings, rating] });
+  }
   function resize(value: number) { save({ ...preferences, manual: true, height: clamp(value, maximumHeight) }); }
   function resetHeight() { save({ ...preferences, manual: false, height: defaultHeight }); }
   function endDrag() { drag.current = null; setDragging(false); }
   return <section ref={panel} className={`filter-panel resizable-filters${preferences.collapsed ? " collapsed" : ""}`}
-    aria-label="标签筛选条件" style={{ height: preferences.collapsed ? "auto" : height }}>
+    aria-label={showRating ? "网页筛选条件" : "标签筛选条件"} style={{ height: preferences.collapsed ? "auto" : height }}>
     <div className="filter-heading" ref={heading}>
       <button className="filter-collapse" aria-expanded={!preferences.collapsed} aria-controls={optionsId}
-        aria-label={preferences.collapsed ? "展开标签筛选" : "收起标签筛选"}
+        aria-label={preferences.collapsed ? (showRating ? "展开网页筛选" : "展开标签筛选") : (showRating ? "收起网页筛选" : "收起标签筛选")}
         onClick={() => save({ ...preferences, collapsed: !preferences.collapsed })}>
         <Icon name="arrow" size={13} /><b>{title}</b>
         <span>{preferences.collapsed ? "展开" : "收起"}</span>
@@ -105,6 +121,19 @@ export function TagFilters({ pages, categories, tags, filter, change, matches, t
           {categoryOptions.map(({ id, count }) => <button key={id} className="filter-chip" aria-pressed={filter.category === id}
             onClick={() => change({ ...filter, category: filter.category === id ? "" : id })}><span>{categoryName(id)}</span><small>{count}</small></button>)}
         </div>
+        {showRating && <>
+          <div className="filter-label">评分 <span>多选</span></div>
+          <div className="filter-chips" role="group" aria-label="评分筛选">
+            <button className="filter-chip" aria-pressed={!selectedRatings.length} onClick={() => change({ ...filter, ratings: [] })}>全部</button>
+            <button className="filter-chip" aria-label="未评分" title="未评分" aria-pressed={selectedRatings.includes("unrated")} onClick={() => toggleRating("unrated")}>
+              <RatingFilterStars rating={0} /><small>{ratingCandidates.filter(page => matchesRating(page, ["unrated"])).length}</small>
+            </button>
+            {ratingSteps.map(rating => <button key={rating} className="filter-chip" aria-label={`${rating} 星`} title={`${rating} 星`} aria-pressed={selectedRatings.includes(rating)}
+              onClick={() => toggleRating(rating)}>
+              <RatingFilterStars rating={rating} /><small>{ratingCandidates.filter(page => matchesRating(page, [rating])).length}</small>
+            </button>)}
+          </div>
+        </>}
         <div className="filter-label" title="多个标签同时满足">小标签 <span>多选</span></div>
         <div className="filter-chips" role="group" aria-label="小标签筛选">
           {tagOptions.map(({ id, count }) => <button key={id} className="filter-chip" aria-pressed={filter.tags.includes(id)}
@@ -116,7 +145,7 @@ export function TagFilters({ pages, categories, tags, filter, change, matches, t
         </div>
       </div>
       <div className={`filter-height-divider${dragging ? " dragging" : ""}`} role="separator" tabIndex={0}
-        aria-label="调整标签区域高度" aria-orientation="horizontal" aria-controls={optionsId}
+        aria-label={showRating ? "调整网页筛选区域高度" : "调整标签区域高度"} aria-orientation="horizontal" aria-controls={optionsId}
         aria-valuemin={minimumHeight} aria-valuemax={Math.round(maximumHeight)} aria-valuenow={Math.round(height)} aria-valuetext={`${Math.round(height)} 像素`}
         title="拖动调整高度 · 上下方向键微调 · 双击恢复紧凑自动高度"
         onDoubleClick={resetHeight}

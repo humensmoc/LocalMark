@@ -15,7 +15,7 @@ import {
 } from "./model";
 import { videoTarget, subtitleTime } from "./video-transcript";
 import { videoMarkLink, videoPageUrl } from "./video-marks";
-import { ScreenshotGallery } from "./ScreenshotImage";
+import { SavedImage, ScreenshotGallery } from "./ScreenshotImage";
 import { request } from "./protocol";
 import { Icon } from "./Icon";
 import { TagBrowser, type TagFilter } from "./TagBrowser";
@@ -307,6 +307,7 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
       style={{ "--mark": colorInfo(m.color).hex } as React.CSSProperties}
     >
       {m.anchor.kind === "element" && <small className="element-kind">元素 · {m.anchor.tag}</small>}
+      {m.imagePath && <div className="screenshot-gallery" aria-label="已保存的网页图片"><SavedImage mark={m} allowPreview={false} /></div>}
       {p.url !== url && p.url !== rawUrl && (
         <button className="title muted" onClick={() => jump(p, m)}>
           {p.title}
@@ -367,11 +368,11 @@ function App({ windowId, initial }: { windowId: number; initial: Drafts }) {
         aria-label={`跳转到截图 ${subtitleTime(m.time)}`} onClick={() => void videoAction(p, m, "jump")}
         onKeyDown={event => videoJumpKey(event, p, m)}><ScreenshotGallery marks={[m]} allowPreview={false} /></div>}
       <button type="button" className="element-kind video-card-kind-jump" onClick={() => void videoAction(p, m, "jump")}
-        title={`跳转到${m.kind === "subtitle" ? "字幕" : m.kind === "screenshot" ? "截图" : "关键帧"} ${subtitleTime(m.time)}`}>
-        {m.kind === "subtitle" ? "字幕标注" : m.kind === "screenshot" ? "截图" : "关键帧"} · {subtitleTime(m.time)}
+        title={`跳转到${m.kind === "subtitle" ? "字幕" : m.kind === "screenshot" ? "截图" : m.kind === "comment" ? "视频评论" : "关键帧"} ${subtitleTime(m.time)}`}>
+        {m.kind === "subtitle" ? "字幕标注" : m.kind === "screenshot" ? "截图" : m.kind === "comment" ? "视频评论" : "关键帧"} · {subtitleTime(m.time)}
       </button>
       {p.url !== url && <button className="title muted" onClick={() => void videoAction(p, m, "jump")}>{p.title}</button>}
-      {m.kind !== "screenshot" && <div className="quote" tabIndex={0} role="button" onClick={() => void videoAction(p, m, "jump")}
+      {m.text && m.kind !== "screenshot" && <div className="quote" tabIndex={0} role="button" onClick={() => void videoAction(p, m, "jump")}
         onKeyDown={event => videoJumpKey(event, p, m)}>{m.text}</div>
       }
       {m.note && <div className="note video-card-note-jump" tabIndex={0} role="button"

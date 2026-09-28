@@ -131,3 +131,26 @@ it("invalidates translated precision when wrappers hide, change and return", () 
   expect(painter.approximate.has(a.id)).toBe(false);
   expect(painter.ranges.get(a.id)?.toString()).toBe("中文译文");
 });
+
+it("paints only the exact source selection when its Chinese translation is hidden", () => {
+  document.body.innerHTML = '<p data-imt-p="1">Before selected source after.<font class="immersive-translate-target-wrapper">中文译文</font></p>';
+  const source = document.querySelector("p")!.firstChild!;
+  const wrapper = document.querySelector("font") as HTMLElement;
+  const translation = wrapper.firstChild!;
+  const selection = document.createRange();
+  selection.setStart(source, 7);
+  selection.setEnd(translation, translation.textContent!.length);
+  const captured = captureSelection(selection)!;
+  const a: Mark = { id: "mixed", ...captured, note: "有评论", tags: [], color: "yellow",
+    createdAt: "2026-09-28T00:00:00.000Z", updatedAt: "2026-09-28T00:00:00.000Z" };
+  const painter = new Painter();
+  painter.paint([a], true);
+  wrapper.style.display = "none";
+  painter.invalidate();
+  painter.paint([a], true);
+  const text = (name: string) => [...CSS.highlights.get(name)!].map(range => range.toString()).join("");
+  expect(text("wc-yellow")).toBe("selected source after.");
+  expect(text("wc-note-yellow")).toBe("selected source after.");
+  expect(CSS.highlights.has("wc-context-yellow")).toBe(false);
+  expect(painter.approximate.has(a.id)).toBe(true);
+});

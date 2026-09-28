@@ -65,10 +65,11 @@ export const MarkSchema = z
     tags: z.array(z.string().min(1).max(100)).max(50),
     color: ColorSchema,
     anchor: AnchorSchema,
+    imagePath: z.string().regex(/^media\/[a-f0-9]{16}\/[a-f0-9-]{36}\.png$/).optional(),
     createdAt: timestamp,
     updatedAt: timestamp,
   })
-  ; // Display text can change without changing the original source anchor.
+  .refine(m => !m.imagePath || (m.anchor.kind === "element" && m.anchor.tag === "img"), "只有图片元素标注可以引用图片文件"); // Display text can change without changing the original source anchor.
 const VideoCueRefSchema = z.object({
   index: z.number().int().nonnegative(),
   start: z.number().finite().nonnegative(),
@@ -77,13 +78,13 @@ const VideoCueRefSchema = z.object({
 });
 export const VideoMarkSchema = z.object({
   id: z.string().uuid(),
-  kind: z.enum(["subtitle", "keyframe", "screenshot"]),
+  kind: z.enum(["subtitle", "keyframe", "screenshot", "comment"]),
   videoKey: z.string().min(1).max(500),
   time: z.number().finite().nonnegative(),
   trackId: z.string().max(2000).optional(),
   from: VideoCueRefSchema.optional(),
   to: VideoCueRefSchema.optional(),
-  text: z.string().min(1).max(100000),
+  text: z.string().max(100000),
   note: z.string().max(100000),
   color: ColorSchema,
   imagePath: z.string().regex(/^media\/[a-f0-9]{16}\/[a-f0-9-]{36}\.png$/).optional(),
@@ -92,6 +93,10 @@ export const VideoMarkSchema = z.object({
 }).superRefine((mark, ctx) => {
   if (mark.kind === "subtitle" && (!mark.trackId || !mark.from || !mark.to))
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "字幕标注缺少语言或句子定位" });
+  if (mark.kind === "subtitle" && !mark.text.trim())
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "字幕标注缺少原文" });
+  if (mark.kind === "comment" && (!mark.note.trim() || mark.trackId || mark.from || mark.to || mark.text))
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "视频评论必须包含内容，且不能绑定字幕" });
   if (mark.kind === "screenshot" && !mark.imagePath)
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "截图缺少本地图片路径" });
   if (mark.kind !== "screenshot" && mark.imagePath)
@@ -101,7 +106,7 @@ export type VideoMark = z.infer<typeof VideoMarkSchema>;
 export type VideoCueRef = z.infer<typeof VideoCueRefSchema>;
 export const PageSchema = z
   .object({
-    schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+    schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
     id: z.string().regex(/^[a-f0-9]{16}$/),
     url: z
       .string()
@@ -148,7 +153,8 @@ export const PageSchema = z
   })
   .refine(p => p.schemaVersion === 1 || (!!p.categoryId && Array.isArray(p.tagIds) && new Set(p.tagIds).size === p.tagIds.length), "网页必须包含有效的分类 ID 和不重复的标签 ID")
   .refine(p => p.schemaVersion >= 3 || p.annotations.every(m => m.anchor.kind !== "element"), "元素标注需要 v3 元数据，请升级插件")
-  .refine(p => p.schemaVersion === 4 || !p.videoMarks?.length, "视频标注需要 v4 元数据，请升级插件")
+  .refine(p => p.schemaVersion >= 4 || !p.videoMarks?.length, "视频标注需要 v4 元数据，请升级插件")
+  .refine(p => p.schemaVersion === 5 || !(p.videoMarks ?? []).some(m => m.kind === "comment" || !m.text), "无字幕视频标注需要 v5 元数据，请升级插件")
   .refine(
     (p) =>
       new Set(p.annotations.map((a) => a.id)).size === p.annotations.length,
@@ -351,15 +357,17 @@ function frontmatterMarkdown(p: Page, legacyTextLinks: boolean) {
     const label = m.anchor.kind === "element" ? `元素标注（${md(m.anchor.tag)}）\n\n` : "";
     const quote = label + m.text.split("\n").map((line) => "> " + md(line)).join("\n");
     const note = m.note.trim() ? m.note.split("\n").map(md).join("  \n") : "";
+    const relative = m.imagePath ? (p.markdownFile ? m.imagePath : `../${m.imagePath}`) : "";
+    const image = relative ? `\n\n![网页图片](<${relative}>)` : "";
     // Keep the old format only for recognizing untouched exports during sync.
     if (legacyTextLinks)
       return `${quote}\n\n${note ? note + "\n\n" : ""}[回到原文并高亮](<${textLink(p, m.anchor)}>)\n`;
-    return `${quote}${note ? "\n\n" + note : ""}\n`;
+    return `${quote}${image}${note ? "\n\n" + note : ""}\n`;
   }).join("\n---\n\n");
   const videos = (p.videoMarks ?? []).map(mark => {
-    const label = mark.kind === "subtitle" ? "字幕标注" : mark.kind === "screenshot" ? "截图" : "关键帧";
+    const label = mark.kind === "subtitle" ? "字幕标注" : mark.kind === "screenshot" ? "截图" : mark.kind === "comment" ? "视频评论" : "关键帧";
     const relative = mark.imagePath ? (p.markdownFile ? mark.imagePath : `../${mark.imagePath}`) : "";
-    return `> ${md(mark.text)}\n\n${mark.note.trim() ? mark.note.split("\n").map(md).join("  \n") + "\n\n" : ""}${relative ? `![视频截图](<${relative}>)\n\n` : ""}${label} · ${Math.floor(mark.time / 60)}:${String(Math.floor(mark.time) % 60).padStart(2, "0")} · [跳转视频](<${videoMarkLink(p, mark).replace(/>/g, "%3E")}>)\n`;
+    return `${mark.text ? `> ${md(mark.text)}\n\n` : ""}${mark.note.trim() ? mark.note.split("\n").map(md).join("  \n") + "\n\n" : ""}${relative ? `![视频截图](<${relative}>)\n\n` : ""}${label} · ${Math.floor(mark.time / 60)}:${String(Math.floor(mark.time) % 60).padStart(2, "0")} · [跳转视频](<${videoMarkLink(p, mark).replace(/>/g, "%3E")}>)\n`;
   }).join("\n---\n\n");
   return header + comment + excerpts + (videos ? `${excerpts ? "\n---\n\n" : ""}${videos}` : "");
 }

@@ -10,7 +10,13 @@ const out = resolve("test-results");
 await mkdir(out, { recursive: true });
 const fixture = await readFile("tests/fixture.html", "utf8");
 const elementFixture = await readFile("tests/elements-fixture.html", "utf8");
+const elementImage = await readFile("public/icons/128.png");
 const server = createServer((req, res) => {
+  if (req.url === "/element-image.png") {
+    res.setHeader("Content-Type", "image/png");
+    res.end(elementImage);
+    return;
+  }
   if (req.url === "/site-icon.svg") {
     res.setHeader("Content-Type", "image/svg+xml");
     res.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#6656ef"/><path d="M32 10 49 42 32 54 15 42Z" fill="#b7eaff"/></svg>');

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
 import { captureElement, elementChain, locateElement } from "../src/element-anchors";
-import { AnchorSchema, emptyLibrary, folderName, markdown, pageId, parsePage, type Page } from "../src/model";
+import { AnchorSchema, MarkSchema, emptyLibrary, folderName, markdown, pageId, parsePage, type Page } from "../src/model";
 import { prepareMetadataImport } from "../src/metadata-import";
 import { Painter, capture } from "../src/anchors";
 Object.defineProperty(globalThis, "crypto", { value: webcrypto });
@@ -81,6 +81,19 @@ async function elementPage(): Promise<Page> {
     annotations: [{ id: crypto.randomUUID(), anchor: captureElement(target()), text: "可编辑的卡片说明", note: "卡片批注", tags: [], color: "blue", createdAt: now, updatedAt: now }] };
 }
 describe("element persistence and coexistence", () => {
+  it("stores an image path with an img mark and exports a local Markdown image", async () => {
+    const page = await elementPage();
+    document.body.innerHTML = '<img src="https://example.com/image.png" alt="设计草图">';
+    const mark = page.annotations[0];
+    const imagePath = `media/${page.id}/${mark.id}.png`;
+    page.annotations[0] = MarkSchema.parse({ ...mark, anchor: captureElement(document.querySelector("img")!), imagePath });
+    page.markdownFile = "元素测试.md";
+    expect((await parsePage(JSON.stringify(page))).annotations[0].imagePath).toBe(imagePath);
+    expect(markdown(page)).toContain(`![网页图片](<${imagePath}>)`);
+    delete page.markdownFile;
+    expect(markdown(page)).toContain(`![网页图片](<../${imagePath}>)`);
+    expect(() => MarkSchema.parse({ ...mark, imagePath })).toThrow();
+  });
   it("round-trips v3 and imports without downgrading or discarding anchors", async () => {
     const page = await elementPage(), raw = JSON.stringify(page);
     expect((await parsePage(raw)).annotations).toEqual(page.annotations);

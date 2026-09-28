@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PageSchema, VideoMarkSchema } from "../src/model";
+import { PageSchema, VideoMarkSchema, emptyLibrary, markdown } from "../src/model";
+import { prepareMetadataImport } from "../src/metadata-import";
 import { cueForTime, markCueRange, videoCueRef, videoPageUrl } from "../src/video-marks";
 
 const cues = [
@@ -33,6 +34,28 @@ describe("video annotation anchors", () => {
       annotations: [], videoMarks: [mark], category: "未分类", categoryId: "category:uncategorized", tagIds: [] });
     expect(page.videoMarks).toEqual([mark]);
     expect(() => PageSchema.parse({ ...page, schemaVersion: 3 })).toThrow();
+  });
+  it("stores independent comments and empty-text time points in v5 without inventing subtitles", async () => {
+    const comment = VideoMarkSchema.parse({ ...mark, kind: "comment", trackId: undefined, from: undefined, to: undefined,
+      text: "", note: "无字幕评论", time: 5.125 });
+    const keyframe = VideoMarkSchema.parse({ ...mark, kind: "keyframe", trackId: undefined, from: undefined, to: undefined,
+      text: "", note: "", time: 5.5, id: "00000000-0000-4000-8000-000000000002" });
+    expect(markCueRange(comment, cues, "en")).toEqual([1, 1]);
+    expect(markCueRange(comment, [], "en")).toBeNull();
+    expect(() => VideoMarkSchema.parse({ ...comment, note: "" })).toThrow();
+    const page = PageSchema.parse({ schemaVersion: 5, id: "0123456789abcdef", url: "https://www.youtube.com/watch?v=first",
+      originalUrl: "https://www.youtube.com/watch?v=first", title: "Video", favicon: "",
+      folderName: "Video--0123456789abcdef", createdAt: now, updatedAt: now,
+      annotations: [], videoMarks: [comment, keyframe], category: "未分类", categoryId: "category:uncategorized", tagIds: [] });
+    expect(() => PageSchema.parse({ ...page, schemaVersion: 4 })).toThrow();
+    const exported = markdown(page);
+    expect(exported).toContain("无字幕评论");
+    expect(exported).toContain("视频评论 · 0:05");
+    expect(exported).not.toContain("> \n");
+    const imported = await prepareMetadataImport(emptyLibrary(), [{ name: "video.json", text: JSON.stringify(page) }]);
+    expect(imported.items[0].status).toBe("pending");
+    expect(imported.library.entries[page.id].page.schemaVersion).toBe(5);
+    expect(imported.library.entries[page.id].page.videoMarks).toEqual([comment, keyframe]);
   });
   it("normalizes watch and part URLs", () => {
     expect(videoPageUrl({ site: "youtube", key: "youtube:first" })).toBe("https://www.youtube.com/watch?v=first");

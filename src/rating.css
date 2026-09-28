@@ -29,6 +29,9 @@
 .rating-stars svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.5; }
 .rating-stars svg.filled { fill: currentColor; }
 .rating-stars > button:focus-visible, .rating-clear:focus-visible { outline: 2px solid var(--rating-color, #b99af2); outline-offset: 2px; }
+.rating-filter-stars { display: inline-flex; align-items: center; gap: 1px; white-space: nowrap; vertical-align: middle; color: var(--rating-color); }
+.rating-filter-stars svg { display: block; width: 13px; height: 13px; fill: currentColor; stroke: currentColor; stroke-width: 1.5; }
+.rating-filter-stars.unrated svg { fill: none; }
 .rating-editor-row > .rating-clear { margin-left: auto; padding: 3px 5px; background: transparent; border: 0; font-size: 11px; }
 .rating-value { font-size: 11px; }
 .content-source .rated-source-meta { display: flex; align-items: center; gap: 8px; }

@@ -1,6 +1,10 @@
 import type { Page, VideoCueRef, VideoMark } from "./model";
 import type { SubtitleCue, VideoTarget } from "./video-transcript";
 
+export function videoMarkLabel(kind: VideoMark["kind"]): string {
+  return kind === "subtitle" ? "字幕标注" : kind === "screenshot" ? "截图" : kind === "comment" ? "视频评论" : "关键帧";
+}
+
 export function videoPageUrl(target: VideoTarget): string {
   const parts = target.key.split(":");
   if (target.site === "youtube") return `https://www.youtube.com/watch?v=${encodeURIComponent(parts[1])}`;

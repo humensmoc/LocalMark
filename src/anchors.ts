@@ -359,7 +359,6 @@ export class Painter {
     this.approximate.clear();
     this.excerpts.clear();
     const grouped = new Map<Color, Range[]>();
-    const context = new Map<Color, Range[]>();
     for (const m of marks) {
       const key = JSON.stringify(m.anchor);
       let cached = this.cache.get(m.id);
@@ -382,7 +381,9 @@ export class Painter {
         const ranges = [...resolved.exact, ...resolved.context];
         if (!ranges.length) continue;
         this.ranges.set(m.id, ranges[0]);
-        this.allRanges.set(m.id, ranges);
+        // Approximate source paragraphs remain available for navigation, but
+        // only exact text is painted or hit-tested on the page.
+        this.allRanges.set(m.id, resolved.exact);
         if (resolved.context.length) this.approximate.add(m.id);
         if (!resolved.context.length) {
           if (cached.text !== m.text) {
@@ -395,9 +396,6 @@ export class Painter {
         const exactRanges = grouped.get(m.color) ?? [];
         exactRanges.push(...resolved.exact);
         grouped.set(m.color, exactRanges);
-        const contextRanges = context.get(m.color) ?? [];
-        contextRanges.push(...resolved.context);
-        context.set(m.color, contextRanges);
       }
     }
     const api = (CSS as unknown as { highlights?: Registry }).highlights,
@@ -407,13 +405,15 @@ export class Painter {
       for (const color of this.colors) if (!colors.includes(color)) {
         api.delete("wc-" + this.colorName(color));
         api.delete("wc-context-" + this.colorName(color));
+        api.delete("wc-note-" + this.colorName(color));
       }
       this.colors = colors;
       const rules = colors.filter(color => color.startsWith("#")).map(color => {
         const hex = colorInfo(color).hex;
+        const underline = `color-mix(in srgb, ${hex} 58%, #17231f)`;
         const rgb = [1, 3, 5].map(start => parseInt(hex.slice(start, start + 2), 16));
         const ink = rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114 > 150 ? "#17231f" : "#ffffff";
-        return `::highlight(wc-${this.colorName(color)}) { background: ${hex}; color: ${ink}; } ::highlight(wc-context-${this.colorName(color)}) { text-decoration: underline dashed ${hex}; }`;
+        return `::highlight(wc-${this.colorName(color)}) { background: ${hex}; color: ${ink}; } ::highlight(wc-note-${this.colorName(color)}) { text-decoration: underline wavy ${underline}; }`;
       }).join("\n");
       if (rules !== this.colorRules) {
         this.colorSheet ??= new CSSStyleSheet();
@@ -424,10 +424,27 @@ export class Painter {
         document.adoptedStyleSheets = [...document.adoptedStyleSheets, this.colorSheet];
       for (const c of this.colors) {
         api.set("wc-" + this.colorName(c), new H(...(grouped.get(c) ?? [])));
-        api.set("wc-context-" + this.colorName(c), new H(...(context.get(c) ?? [])));
+        api.delete("wc-context-" + this.colorName(c));
       }
+      this.updateCommentIndicators(marks);
     }
     return this.ranges;
+  }
+  updateCommentIndicators(marks: Mark[]) {
+    const api = (CSS as unknown as { highlights?: Registry }).highlights,
+      H = (window as unknown as { Highlight?: HighlightCtor }).Highlight;
+    if (!api || !H || !this.visible) return;
+    const comments = new Map<Color, Range[]>();
+    for (const mark of marks) {
+      if (!mark.note.trim()) continue;
+      const exact = this.allRanges.get(mark.id);
+      if (!exact?.length) continue;
+      const ranges = comments.get(mark.color) ?? [];
+      ranges.push(...exact);
+      comments.set(mark.color, ranges);
+    }
+    for (const color of this.colors)
+      api.set("wc-note-" + this.colorName(color), new H(...(comments.get(color) ?? [])));
   }
   hit(x: number, y: number) {
     const hits: string[] = [];
@@ -478,6 +495,7 @@ export class Painter {
     for (const c of this.colors) {
       api?.delete("wc-" + this.colorName(c));
       api?.delete("wc-context-" + this.colorName(c));
+      api?.delete("wc-note-" + this.colorName(c));
     }
     api?.delete("wc-focus");
     if (this.colorSheet) document.adoptedStyleSheets = document.adoptedStyleSheets.filter(sheet => sheet !== this.colorSheet);

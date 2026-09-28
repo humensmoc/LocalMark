@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "本地摘录 · Web Clipper",
   "description": "在网页上高亮、批注和分类，将每页摘录自动保存到本地 Markdown 与 JSON。",
-  "version": "0.3.18",
+  "version": "0.3.31",
   "minimum_chrome_version": "128",
   "permissions": [
     "storage",
@@ -33,6 +33,18 @@
   },
   "options_page": "settings.html",
   "content_scripts": [
+    {
+      "matches": [
+        "https://*.bilibili.com/*",
+        "https://*.youtube.com/*",
+        "https://*.gdcvault.com/*"
+      ],
+      "js": [
+        "video-keyboard-guard.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "https://*.bilibili.com/*",

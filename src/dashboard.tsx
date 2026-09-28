@@ -21,6 +21,7 @@ import { PageRating } from "./PageRating";
 import { PageTitle, type TitleDraft } from "./PageTitle";
 import { SiteIcon } from "./SiteIcon";
 import { Icon } from "./Icon";
+import { SavedImage } from "./ScreenshotImage";
 import { MetadataImport } from "./MetadataImport";
 import { useDashboardLayout } from "./DashboardLayout";
 import { TaxonomyManager } from "./TaxonomyManager";
@@ -126,7 +127,7 @@ function Dashboard() {
   useEffect(() => {
     detail.current?.scrollTo(0, 0);
   }, [selectedId]);
-  useEffect(() => { setCheckedIds([]); }, [query, filter.category, JSON.stringify(filter.tags)]);
+  useEffect(() => { setCheckedIds([]); }, [query, filter.category, JSON.stringify(filter.ratings), JSON.stringify(filter.tags)]);
   useEffect(() => {
     if (!lib.taxonomy) return;
     setContentFilter(old => {
@@ -136,7 +137,7 @@ function Dashboard() {
     });
     setFilter(old => {
       const next = { category: lib.taxonomy!.categories.some(x => x.id === old.category) ? old.category : "",
-        tags: old.tags.filter(id => lib.taxonomy!.tags.some(x => x.id === id)) };
+        tags: old.tags.filter(id => lib.taxonomy!.tags.some(x => x.id === id)), ...(old.ratings?.length ? { ratings: old.ratings } : {}) };
       return JSON.stringify(next) === JSON.stringify(old) ? old : next;
     });
   }, [taxonomyToken(lib)]);
@@ -264,7 +265,7 @@ function Dashboard() {
             selection={multiSelect ? { ids: checkedIds, toggle: id => setCheckedIds(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id]) } : undefined}
             selectionControls={summary => <BulkToolbar key={JSON.stringify([query, filter])} summary={summary} lib={lib} selected={checkedIds}
               active={multiSelect} toggleMode={() => { setMultiSelect(old => !old); setCheckedIds([]); }}
-              visible={pages.filter(p => matches(p) && (!filter.category || p.categoryId === filter.category) && filter.tags.every(id => p.tagIds?.includes(id)))}
+              visible={pages.filter(p => matches(p) && matchesTagFilter(p, filter, lib.taxonomy))}
               select={setCheckedIds} mutate={mutate} />}
             pages={pages}
             categories={categories}
@@ -275,6 +276,7 @@ function Dashboard() {
             matches={matches}
             selectedId={selectedId}
             compactCards
+            showRatingFilter
             filterDivider={layout.filterDivider}
             open={(p) => setSelectedId(p.id)}
           />
@@ -552,6 +554,7 @@ function MarkEditor({
       >
         <div className="mark-preview-heading">
           {mark.anchor.kind === "element" && <small className="element-kind">元素 · {mark.anchor.tag}</small>}
+          {mark.imagePath && <SavedImage mark={mark} allowPreview={false} />}
           <blockquote>{mark.text}</blockquote>
           <button
             aria-label={mark.anchor.kind === "element" ? "编辑元素标注" : "编辑高亮"}

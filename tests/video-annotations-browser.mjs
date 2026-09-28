@@ -76,6 +76,29 @@ try {
   const panel = page.locator("#localmark-video-transcript");
   await until(async () => await panel.locator(".cue").count() === 20, "subtitle cues");
   await page.bringToFront();
+  await page.keyboard.press("Shift+Enter");
+  assert.equal(await panel.getByLabel("当前字幕批注").evaluate(input => input.getRootNode().activeElement === input), true);
+  await page.evaluate(() => {
+    window.siteShortcutKeys = [];
+    for (const type of ["keydown", "keyup", "keypress"])
+      window.addEventListener(type, event => window.siteShortcutKeys.push(`${type}:${event.key}`), true);
+  });
+  await page.keyboard.type("快捷输入");
+  await page.keyboard.press("Space");
+  await page.keyboard.press("k");
+  assert.equal(await panel.getByLabel("当前字幕批注").inputValue(), "快捷输入 k");
+  assert.deepEqual(await page.evaluate(() => window.siteShortcutKeys), [], "Typing in the video note must not reach website shortcuts");
+  await page.keyboard.press("Shift+Enter");
+  assert.equal(await panel.getByLabel("当前字幕批注").inputValue(), "快捷输入 k\n");
+  await panel.getByLabel("当前字幕批注").fill("");
+  await panel.getByRole("button", { name: "搜索字幕" }).click();
+  await page.evaluate(() => { window.siteShortcutKeys = []; });
+  await page.keyboard.type("k ");
+  assert.equal(await panel.getByLabel("在字幕中搜索").inputValue(), "k ");
+  assert.deepEqual(await page.evaluate(() => window.siteShortcutKeys), [], "Typing in transcript search must not reach website shortcuts");
+  await panel.getByRole("button", { name: "收起搜索" }).click();
+  await page.mouse.click(5, 5);
+  report.checks.push("Shift+Enter focuses the current subtitle note on a video page");
   const drag = await page.evaluate(() => {
     const root = document.querySelector("#localmark-video-transcript").shadowRoot;
     const cues = root.querySelectorAll(".cue");
@@ -98,11 +121,37 @@ try {
   await until(async () => await panel.locator(".video-editor").count() === 1, "real mouse selection popup");
   assert.equal(await page.evaluate(() => document.querySelector("#localmark-video-transcript").shadowRoot.getSelection().toString()), selectedText);
   assert.equal(await panel.locator(".video-editor textarea").evaluate(el => el.getRootNode().activeElement === el), false);
+  await page.evaluate(() => { window.siteShortcutKeys = []; });
   await page.keyboard.type("x");
   assert.equal(await panel.locator(".video-editor textarea").inputValue(), "x");
+  assert.deepEqual(await page.evaluate(() => window.siteShortcutKeys), [], "The first key focusing a selection note must not reach website shortcuts");
   await page.mouse.click(5, 5);
   await until(async () => await panel.locator(".video-editor").count() === 0, "outside click closes video editor");
+  await page.keyboard.press("k");
+  assert((await page.evaluate(() => window.siteShortcutKeys)).includes("keydown:k"), "Page shortcuts remain available outside the video editor");
   report.checks.push("subtitle selection stays available and an outside click closes the video editor");
+  await page.mouse.move(drag[0].x, drag[0].y);
+  await panel.locator(".cue-time-popup").waitFor();
+  const timeButton = panel.locator(".cue-time-button");
+  const plainTimeStyle = await timeButton.evaluate(button => ({
+    background: getComputedStyle(button).backgroundColor,
+    border: getComputedStyle(button).borderColor,
+    shadow: getComputedStyle(button).boxShadow,
+  }));
+  const hoverTimeRect = await timeButton.boundingBox();
+  assert(hoverTimeRect);
+  await page.mouse.move(hoverTimeRect.x + hoverTimeRect.width / 2, hoverTimeRect.y + hoverTimeRect.height / 2);
+  await until(() => timeButton.evaluate(button => button.matches(":hover")), "timestamp button hover");
+  const hoveredTimeStyle = await timeButton.evaluate(button => ({
+    background: getComputedStyle(button).backgroundColor,
+    border: getComputedStyle(button).borderColor,
+    shadow: getComputedStyle(button).boxShadow,
+  }));
+  assert.notEqual(hoveredTimeStyle.background, plainTimeStyle.background);
+  assert.notEqual(hoveredTimeStyle.border, plainTimeStyle.border);
+  assert.notEqual(hoveredTimeStyle.shadow, plainTimeStyle.shadow);
+  await page.screenshot({ path: join(out, "timestamp-hover.png") });
+  report.checks.push("timestamp button has distinct hover background, border and ring");
   await page.evaluate(() => {
     const root = document.querySelector("#localmark-video-transcript").shadowRoot;
     const cues = root.querySelectorAll(".cue");
@@ -131,6 +180,7 @@ try {
         bands: ["--cue-annotation-band", "--cue-current-band"]
           .map(name => style.getPropertyValue(name).trim()),
         base: style.getPropertyValue("--cue-highlight-base").trim(),
+        annotation: style.getPropertyValue("--annotation").trim(),
         background: style.backgroundImage,
         underline: style.textDecorationLine,
         underlineColor: style.textDecorationColor,
@@ -142,6 +192,7 @@ try {
     return states;
   });
   for (let mask = 0; mask < 8; mask++) {
+    assert.equal(highlightStates[mask].base, mask & 2 ? highlightStates[mask].annotation : highlightStates[0].base);
     for (let band = 0; band < 2; band++) {
       const enabled = !!(mask & (1 << (band + 1)));
       assert.equal(highlightStates[mask].bands[band], enabled ? highlightStates[1 << (band + 1)].bands[band] : highlightStates[mask].base);
@@ -194,14 +245,30 @@ try {
   assert.equal(await screenshotNote.locator(".cue-note-heading").innerText(), "0:05");
   assert.equal(await keyframeNote.locator(".cue-note-heading").innerText(), "0:05");
   report.checks.push("point comments show their own small screenshot or bookmark instead of a type word");
-  for (const note of [screenshotNote, keyframeNote]) {
+  for (const [note, target] of [
+    [screenshotNote, ".cue-note-heading img.screenshot-image"],
+    [keyframeNote, ".cue-note-heading svg"],
+  ]) {
     await page.locator("video").evaluate(video => { video.currentTime = 9.2; video.pause(); });
-    await note.click({ position: { x: 5, y: 5 } });
+    await note.locator(target).click();
     await until(() => page.locator("video").evaluate(video => video.paused && Math.abs(video.currentTime - 5.4) < 0.15), "point comment card seeks exact time");
     assert.equal(await panel.locator(".video-editor").count(), 0);
+    await page.locator("video").evaluate(video => { video.currentTime = 9.2; video.pause(); });
+    const bounds = await note.boundingBox();
+    await note.click({ position: { x: bounds.width - 5, y: bounds.height - 5 } });
+    await until(() => page.locator("video").evaluate(video => video.paused && Math.abs(video.currentTime - 5.4) < 0.15), "point comment card blank area seeks exact time");
   }
-  report.checks.push("clicking any point comment card surface seeks without opening the editor");
+  report.checks.push("clicking point comment image, icon or blank card area seeks without opening the editor");
   const subtitleNote = panel.locator(".cue-note").filter({ hasText: "跨句批注" });
+  await page.locator("video").evaluate(video => { video.currentTime = 9.2; video.pause(); });
+  await subtitleNote.click({ position: { x: 5, y: 5 } });
+  await until(() => page.locator("video").evaluate(video => video.paused && Math.abs(video.currentTime) < 0.15), "subtitle comment card seeks its marked time");
+  assert.equal(await panel.locator(".video-editor").count(), 0);
+  await page.locator("video").evaluate(video => { video.currentTime = 9.2; video.pause(); });
+  const subtitleBounds = await subtitleNote.boundingBox();
+  await subtitleNote.click({ position: { x: subtitleBounds.width - 5, y: subtitleBounds.height - 5 } });
+  await until(() => page.locator("video").evaluate(video => video.paused && Math.abs(video.currentTime) < 0.15), "subtitle comment card blank area seeks its marked time");
+  report.checks.push("clicking subtitle comment card padding or blank area seeks without opening the editor");
   await page.locator("video").evaluate(video => { video.currentTime = 0.4; video.pause(); });
   await until(async () => await panel.locator('.cue.active[data-index="0"]').count() === 1, "playback on annotated cue");
   await subtitleNote.hover();

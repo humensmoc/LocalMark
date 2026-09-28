@@ -76,6 +76,7 @@ export type Request =
       title: string;
       favicon: string;
       mark: Mutation;
+      imageSource?: string;
     }
   | {
       type: "delete";

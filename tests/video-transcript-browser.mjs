@@ -314,6 +314,52 @@ try {
       await panel.locator(".body").evaluate(body => body.scrollTop > 30), "locate current cue after clearing search");
     assert(await p.locator("video").evaluate(v => v.paused && Math.abs(v.currentTime - 43.4) < 0.1));
     report.checks.push(`${site}: locate button scrolls filtered transcript to current playback cue without seeking`);
+    if (site === "bilibili") {
+      const locate = panel.getByRole("button", { name: "定位当前播放字幕" });
+      const button = await locate.boundingBox();
+      const center = { x: button.x + button.width / 2, y: button.y + button.height / 2 };
+      const centered = index => panel.locator(`.cue[data-index="${index}"]`).evaluate(cue => {
+        const body = cue.closest(".body"), a = cue.getBoundingClientRect(), b = body.getBoundingClientRect();
+        return Math.abs((a.top + a.bottom - b.top - b.bottom) / 2) < 12;
+      });
+      await p.mouse.move(center.x, center.y);
+      await p.mouse.down();
+      await p.waitForTimeout(800);
+      assert.equal(await locate.getAttribute("aria-pressed"), "false");
+      const progress = await locate.locator(".locate-progress circle").evaluate(circle =>
+        parseFloat(getComputedStyle(circle).strokeDashoffset));
+      assert(progress > 0 && progress < 69.12, `Hold ring should be partway filled: ${progress}`);
+      await p.mouse.up();
+      await p.waitForTimeout(1300);
+      assert.equal(await locate.getAttribute("aria-pressed"), "false", "Releasing early cancels follow mode");
+      await p.mouse.down();
+      await until(async () => await locate.getAttribute("aria-pressed") === "true", "enter follow mode after 2-second hold");
+      await p.mouse.up();
+      await until(() => centered(43), "follow mode centers the current cue");
+      await p.locator("video").evaluate(video => { video.currentTime = 59.4; video.pause(); });
+      await until(() => centered(59), "follow mode centers the last cue");
+      await p.locator("video").evaluate(video => { video.currentTime = 0.4; video.pause(); });
+      await until(() => centered(0), "follow mode centers the first cue");
+      await panel.screenshot({ path: join(out, "bilibili-following.png") });
+      await p.mouse.down();
+      await until(async () => await locate.getAttribute("aria-pressed") === "false", "exit follow mode after 2-second hold");
+      await p.mouse.up();
+      const stopped = await panel.locator(".body").evaluate(body => body.scrollTop);
+      await p.locator("video").evaluate(video => { video.currentTime = 43.4; video.pause(); });
+      await p.waitForTimeout(800);
+      assert(Math.abs(await panel.locator(".body").evaluate(body => body.scrollTop) - stopped) < 2,
+        "Exiting follow mode stops automatic scrolling");
+      await locate.focus();
+      await p.keyboard.down("Space");
+      await until(async () => await locate.getAttribute("aria-pressed") === "true", "keyboard hold enters follow mode");
+      await p.keyboard.up("Space");
+      await p.waitForTimeout(250);
+      assert.equal(await locate.getAttribute("aria-pressed"), "true", "Releasing Space must not undo the hold");
+      await p.keyboard.down("Space");
+      await until(async () => await locate.getAttribute("aria-pressed") === "false", "keyboard hold exits follow mode");
+      await p.keyboard.up("Space");
+      report.checks.push("Bilibili: partial ring, canceled hold, 2-second pointer and keyboard enter/exit, first/current/last cue centering, and stopped follow");
+    }
     await p.locator("video").evaluate(async (v) => {
       await Promise.race([
         v.play(),

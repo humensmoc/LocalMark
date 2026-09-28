@@ -175,6 +175,21 @@ try {
     }), "GDC locate current cue after clearing search");
   assert(await frame().evaluate(() => { const video = document.querySelector("video"); return video.paused && Math.abs(video.currentTime - 43.4) < 0.1; }));
   report.checks.push("GDC: locate button reveals the current iframe playback cue without seeking");
+  const locate = panel.getByRole("button", { name: "定位当前播放字幕" });
+  const button = await locate.boundingBox();
+  await p.mouse.move(button.x + button.width / 2, button.y + button.height / 2);
+  await p.mouse.down();
+  await until(async () => await locate.getAttribute("aria-pressed") === "true", "GDC follow mode enters");
+  await p.mouse.up();
+  await frame().evaluate(() => { const video = document.querySelector("video"); video.currentTime = 58.4; video.pause(); });
+  await until(() => panel.locator('.cue[data-index="58"]').evaluate(cue => {
+    const body = cue.closest(".body"), a = cue.getBoundingClientRect(), b = body.getBoundingClientRect();
+    return Math.abs((a.top + a.bottom - b.top - b.bottom) / 2) < 12;
+  }), "GDC iframe playback follows to center");
+  await p.mouse.down();
+  await until(async () => await locate.getAttribute("aria-pressed") === "false", "GDC follow mode exits");
+  await p.mouse.up();
+  report.checks.push("GDC: holding the locator follows iframe playback and holding again exits");
   await frame().evaluate(() => document.querySelector("video").play());
   await hoverCue(p, panel.locator(".cue").nth(5));
   await panel.locator(".cue-time-button").click();

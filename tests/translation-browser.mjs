@@ -162,6 +162,7 @@ try {
     "exact location",
   );
   assert.ok((await drawn("wc-yellow")).includes("网页"));
+  assert.equal(await drawn("wc-note-yellow"), "");
   // Saving a comment and receiving sync snapshots must not replace the
   // existing Highlight or any of its resolved ranges.
   await page.evaluate(() => {
@@ -179,9 +180,24 @@ try {
     return current === globalThis.noteHighlight &&
       [...current].every((range, i) => range === globalThis.noteRanges[i]);
   }), "comment-only saves preserve the highlight registry and ranges");
+  assert.ok((await drawn("wc-note-yellow")).includes("网页"));
+  assert.equal(await page.locator("#mwFw").evaluate(el =>
+    getComputedStyle(el, "::highlight(wc-note-yellow)").textDecorationStyle), "wavy");
   Object.assign(mark, (await marks())[0]);
   await page.mouse.move(5, 5);
   await page.screenshot({ path: join(output, "translation-dual.png") });
+  await page.locator("#mwFw .immersive-translate-target-inner").click();
+  await host.locator("#wc-note").fill("");
+  await host.getByRole("button", { name: "保存", exact: true }).click();
+  await until(async () => (await marks())[0].note === "", "comment cleared");
+  await until(async () => (await drawn("wc-note-yellow")) === "", "comment indicator cleared");
+  assert.equal(await drawn("wc-note-yellow"), "");
+  assert.ok(await page.evaluate(() => CSS.highlights.get("wc-yellow") === globalThis.noteHighlight));
+  await page.locator("#mwFw .immersive-translate-target-inner").click();
+  await host.locator("#wc-note").fill("更新评论不重新定位原文");
+  await host.getByRole("button", { name: "保存", exact: true }).click();
+  await until(async () => (await drawn("wc-note-yellow")).includes("网页"), "comment indicator restored");
+  Object.assign(mark, (await marks())[0]);
   await page.evaluate(() =>
     document.documentElement.setAttribute("imt-state", "original"),
   );
@@ -190,11 +206,9 @@ try {
     "attribute-only toggle",
   );
   assert.equal(await drawn("wc-yellow"), "");
-  assert.ok(
-    (await drawn("wc-context-yellow")).startsWith(
-      "With a web annotation system",
-    ),
-  );
+  assert.equal(await drawn("wc-context-yellow"), "");
+  assert.equal(await page.evaluate(() => CSS.highlights.has("wc-context-yellow")), false);
+  assert.equal(await drawn("wc-note-yellow"), "");
   await page.screenshot({ path: join(output, "translation-original.png") });
   await page.evaluate(() =>
     document.documentElement.setAttribute("imt-state", "dual"),
@@ -203,6 +217,7 @@ try {
     async () => !(await bridge()).approximate.includes(mark.id),
     "translation visible again",
   );
+  assert.ok((await drawn("wc-note-yellow")).includes("网页"));
   const wrapperHTML = await page.locator(W).evaluate((e) => e.outerHTML);
   await page.locator(W).evaluate((e) => e.remove());
   await until(
@@ -229,10 +244,7 @@ try {
     "changed translation",
   );
   assert.equal(await drawn("wc-yellow"), "");
-  assert.equal(
-    await drawn("wc-context-yellow"),
-    "新的中文翻译，与原来的句子使用不同措辞。",
-  );
+  assert.equal(await drawn("wc-context-yellow"), "");
   assert.equal((await marks())[0].text, mark.text);
   await page.setViewportSize({ width: 420, height: 850 });
   await page.screenshot({
@@ -312,6 +324,9 @@ try {
       async () => (await bridge()).located.includes(saved.id),
       "formatted quote located",
     );
+    assert.ok((await drawn(`wc-note-${saved.color.replace("#", "hex-")}`)).includes(
+      layout.name === "ordinary" ? "First paragraph" : "Which will you choose?",
+    ));
     await page.mouse.move(4, 4);
     await host
       .getByLabel("定位：" + saved.text.slice(0, 25), { exact: true })
@@ -350,9 +365,52 @@ try {
       .evaluate((e) => e.blur());
     await page.setViewportSize({ width: 1280, height: 900 });
   }
+  const mixedSource = "There were two archives. The first one contains 24,000 Zettel and 1800 bibliographic entries. The second one was bigger and has 66,000 entries with 16,000 bibliographic entries (which is insane). There are very few connections between the two as they served two different purposes.";
+  const mixedStart = mixedSource.indexOf("The second one");
+  const beforeMixed = (await marks()).length;
+  await page.evaluate(({ source, start }) => {
+    const paragraph = document.createElement("p");
+    paragraph.id = "mixed-mark";
+    paragraph.setAttribute("data-imt-p", "1");
+    paragraph.append(document.createTextNode(source));
+    const wrapper = document.createElement("font");
+    wrapper.className = "immersive-translate-target-wrapper";
+    const inner = document.createElement("font");
+    inner.className = "immersive-translate-target-inner";
+    inner.textContent = "这是选区同时包含英文和中文译文的示例。";
+    wrapper.append(inner);
+    paragraph.append(wrapper);
+    document.querySelector("h1").after(paragraph);
+    const selection = document.createRange();
+    selection.setStart(paragraph.firstChild, start);
+    selection.setEnd(inner.firstChild, inner.textContent.length);
+    getSelection().removeAllRanges();
+    getSelection().addRange(selection);
+    const rect = paragraph.getBoundingClientRect();
+    paragraph.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0,
+      clientX: rect.left + 40, clientY: rect.top + 15 }));
+  }, { source: mixedSource, start: mixedStart });
+  await host.locator("#wc-note").fill("同时包含隐藏译文的评论");
+  await host.getByRole("button", { name: "保存", exact: true }).click();
+  await until(async () => (await marks()).length === beforeMixed + 1, "mixed mark saved");
+  const mixed = (await marks()).at(-1);
+  const mixedColor = mixed.color.replace("#", "hex-");
+  const mixedDrawn = name => page.evaluate(name => {
+    const paragraph = document.querySelector("#mixed-mark");
+    return [...(CSS.highlights.get(name) ?? [])].filter(range => paragraph.contains(range.startContainer))
+      .map(range => range.toString()).join("");
+  }, name);
+  await page.evaluate(() => document.documentElement.setAttribute("imt-state", "original"));
+  await until(async () => (await bridge()).approximate.includes(mixed.id), "mixed translation folded");
+  assert.equal(await mixedDrawn(`wc-context-${mixedColor}`), "");
+  assert.ok((await mixedDrawn(`wc-${mixedColor}`)).includes("The second one"));
+  assert.ok((await mixedDrawn(`wc-note-${mixedColor}`)).includes("The second one"));
+  assert.equal(await page.evaluate(color => CSS.highlights.has(`wc-context-${color}`), mixedColor), false);
+  await page.mouse.move(4, 4);
+  await page.locator("#mixed-mark").screenshot({ path: join(output, "translation-mixed-comment-folded.png") });
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: Chinese UI capture, comment-only save preserves highlights, persistence, original/dual attribute toggle, removal/reinsertion, changed wording, reload in both states, bilingual and ordinary excerpt line breaks in storage, comment-only hover with line breaks, narrow layout, build version, no page errors.",
+    "PASS: Chinese UI capture, wavy comment underline and no fallback page mark for hidden or changed translations, comment-only save preserves base highlights, persistence, original/dual attribute toggle, removal/reinsertion, changed wording, reload in both states, bilingual and ordinary excerpt line breaks in storage, comment-only hover with line breaks, narrow layout, build version, no page errors.",
   );
 } finally {
   await context.close();

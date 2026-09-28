@@ -13,7 +13,8 @@ import { Icon } from "./Icon";
 import { TranscriptParagraphs } from "./TranscriptParagraphs";
 import { request } from "./protocol";
 import { colorInfo, highlightPalette, initialHighlightColor, type Color, type Library, type VideoCueRef, type VideoMark } from "./model";
-import { cueForTime, markCueRange, videoCueRef, videoMarksForPage, videoPageUrl } from "./video-marks";
+import { cueForTime, markCueRange, videoCueRef, videoMarkLabel, videoMarksForPage, videoPageUrl } from "./video-marks";
+import { ScreenshotImage } from "./ScreenshotImage";
 import type { CaptureRect } from "./video-capture";
 import {
   DEFAULT_TRANSCRIPT_INTERVAL,
@@ -53,8 +54,11 @@ function Panel({ target }: { target: VideoTarget }) {
     [searchOpen, setSearchOpen] = useState(false),
     [sourceOpen, setSourceOpen] = useState(false),
     [collapsed, setCollapsed] = useState(false),
+    [following, setFollowing] = useState(false),
+    [holdingLocate, setHoldingLocate] = useState(false),
     [current, setCurrent] = useState(-1),
     [playbackTime, setPlaybackTime] = useState(0),
+    [playerReady, setPlayerReady] = useState(false),
     [library, setLibrary] = useState<Library | null>(null),
     [draft, setDraft] = useState<VideoDraft | null>(null),
     [quickNote, setQuickNote] = useState(""),
@@ -74,10 +78,15 @@ function Panel({ target }: { target: VideoTarget }) {
     nativeLanguage = useRef<string | undefined>(undefined),
     searchInput = useRef<HTMLInputElement>(null),
     searchButton = useRef<HTMLButtonElement>(null),
+    quickInput = useRef<HTMLTextAreaElement>(null),
+    shortcutFocus = useRef(false),
     sourceButton = useRef<HTMLButtonElement>(null),
     sourcePopup = useRef<HTMLDivElement>(null),
     pauseCleanup = useRef<(() => void) | null>(null),
     bodyRef = useRef<HTMLDivElement>(null),
+    locateHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null),
+    locatePointer = useRef<number | null>(null),
+    suppressLocateClick = useRef(false),
     draftInput = useRef<HTMLTextAreaElement>(null),
     composerRef = useRef<HTMLDivElement>(null),
     deepLinkDone = useRef(false),
@@ -85,6 +94,30 @@ function Panel({ target }: { target: VideoTarget }) {
   const pageUrl = videoPageUrl(target);
   const page = library ? Object.values(library.entries).find(entry => entry.page.url === pageUrl)?.page : undefined;
   const marks = videoMarksForPage(page, target.key);
+  const hasTranscript = !!data?.cues.length && !error && !busy;
+  function stopLocateHold() {
+    if (locateHoldTimer.current !== null) clearTimeout(locateHoldTimer.current);
+    locateHoldTimer.current = null;
+    locatePointer.current = null;
+    setHoldingLocate(false);
+  }
+  function startLocateHold() {
+    if (locateHoldTimer.current !== null) return;
+    suppressLocateClick.current = false;
+    setHoldingLocate(true);
+    locateHoldTimer.current = setTimeout(() => {
+      locateHoldTimer.current = null;
+      suppressLocateClick.current = true;
+      setHoldingLocate(false);
+      setFollowing(value => !value);
+    }, 2000);
+  }
+  useEffect(() => () => {
+    if (locateHoldTimer.current !== null) clearTimeout(locateHoldTimer.current);
+  }, []);
+  useEffect(() => {
+    if (collapsed || !hasTranscript) stopLocateHold();
+  }, [collapsed, hasTranscript]);
   async function loadMarks() {
     try { setLibrary(await request({ type: "snapshot" })); }
     catch (error) { setMarkError(String(error)); }
@@ -124,8 +157,13 @@ function Panel({ target }: { target: VideoTarget }) {
     const focusOnTyping = (event: KeyboardEvent) => {
       if (!event.ctrlKey && !event.metaKey && !event.altKey &&
         (event.key.length === 1 || event.key === "Process") &&
-        !event.composedPath().includes(composerRef.current as EventTarget))
+        !event.composedPath().includes(composerRef.current as EventTarget) &&
+        !event.composedPath().some(node => node instanceof HTMLElement &&
+          (node.isContentEditable || node.matches("input, textarea, select")))) {
         draftInput.current?.focus({ preventScroll: true });
+        // The first key still targets the page even after focus moves to the note.
+        event.stopImmediatePropagation();
+      }
     };
     document.addEventListener("keydown", focusOnTyping, true);
     return () => document.removeEventListener("keydown", focusOnTyping, true);
@@ -153,6 +191,29 @@ function Panel({ target }: { target: VideoTarget }) {
   useEffect(() => {
     if (searchOpen && !collapsed) searchInput.current?.focus();
   }, [searchOpen, collapsed]);
+  useEffect(() => {
+    if (!collapsed && shortcutFocus.current) {
+      quickInput.current?.focus();
+      shortcutFocus.current = false;
+    }
+  }, [collapsed]);
+  useEffect(() => {
+    const focusQuickInput = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || !event.shiftKey || event.ctrlKey || event.altKey || event.metaKey ||
+        event.isComposing || event.keyCode === 229 || event.repeat || draft ||
+        event.composedPath().some(node => node instanceof HTMLElement &&
+          (node.isContentEditable || node.matches("input, textarea, select")))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setQuickExpanded(true);
+      if (collapsed) {
+        shortcutFocus.current = true;
+        setCollapsed(false);
+      } else quickInput.current?.focus();
+    };
+    document.addEventListener("keydown", focusQuickInput, true);
+    return () => document.removeEventListener("keydown", focusQuickInput, true);
+  }, [collapsed, draft]);
   useEffect(() => {
     if (!sourceOpen) return;
     positionSource();
@@ -287,7 +348,7 @@ function Panel({ target }: { target: VideoTarget }) {
       disposed = false;
     if (target.site === "gdcvault") {
       const update = async () => {
-        if (pending || !data) return;
+        if (pending) return;
         pending = true;
         try {
           const response = await transcriptMessage(
@@ -299,15 +360,18 @@ function Panel({ target }: { target: VideoTarget }) {
             12000,
             "GDC Vault 播放器状态读取超时。",
           );
-          if (disposed || !response?.ok) return;
+          if (disposed) return;
+          if (!response?.ok) { setPlayerReady(false); return; }
           const { currentTime: t, language } = response.data;
+          setPlayerReady(true);
           setPlaybackTime(t);
-          setCurrent(data.cues.findIndex((c) => c.start <= t && c.end > t));
+          setCurrent(data?.cues.findIndex((c) => c.start <= t && c.end > t) ?? -1);
           const previous = nativeLanguage.current;
           nativeLanguage.current = language;
           if (previous !== undefined && language && previous !== language)
             void load(undefined, false, true);
         } catch {
+          if (!disposed) setPlayerReady(false);
           /* A reloaded extension or replaced frame will be checked on retry. */
         } finally {
           pending = false;
@@ -330,7 +394,7 @@ function Panel({ target }: { target: VideoTarget }) {
   async function seek(cue: SubtitleCue) {
     setSeekError("");
     if (videoTarget(location.href)?.key !== target.key) {
-      setSeekError("视频已切换，请等待新字幕加载。");
+      setSeekError("视频已切换，请等待新视频加载。");
       return;
     }
     if (target.site === "gdcvault") {
@@ -343,7 +407,7 @@ function Panel({ target }: { target: VideoTarget }) {
             seconds: cue.start,
           },
           12000,
-          "GDC Vault 播放器跳转未返回结果，请重新加载字幕后再试。",
+          "GDC Vault 播放器跳转未返回结果，请刷新网页后再试。",
         );
         if (!response?.ok)
           throw Error(response?.error || "播放器未接受跳转，请重试。");
@@ -384,10 +448,14 @@ function Panel({ target }: { target: VideoTarget }) {
       setSeekError("播放器未接受跳转，请等待视频加载后重试。");
     }
   }
-  function scrollCue(index: number) {
+  function scrollCue(index: number, center = false) {
     const body = bodyRef.current, cue = body?.querySelector<HTMLElement>(`.cue[data-index="${index}"]`);
     if (!body || !cue) return;
-    body.scrollTo({ top: body.scrollTop + cue.getBoundingClientRect().top - body.getBoundingClientRect().top - body.clientHeight / 3, behavior: "smooth" });
+    const cueRect = cue.getBoundingClientRect(), bodyRect = body.getBoundingClientRect();
+    const offset = center
+      ? (cueRect.top + cueRect.bottom - bodyRect.top - bodyRect.bottom) / 2
+      : cueRect.top - bodyRect.top - body.clientHeight / 3;
+    body.scrollTo({ top: body.scrollTop + offset, behavior: "smooth" });
   }
   async function locatePlaybackCue() {
     if (!data?.cues.length || busy) return;
@@ -444,11 +512,11 @@ function Panel({ target }: { target: VideoTarget }) {
     return () => chrome.runtime.onMessage?.removeListener(listener);
   }, [marks, data, target.key]);
   useEffect(() => {
-    if (!data || deepLinkDone.current || target.site !== "gdcvault") return;
+    if (deepLinkDone.current || target.site !== "gdcvault" || !playerReady) return;
     const time = Number(location.hash.match(/^#localmark-time=([\d.]+)$/)?.[1]);
     deepLinkDone.current = true;
     if (Number.isFinite(time) && time >= 0) void seek({ start: time, end: time + 0.001, text: "" });
-  }, [data, target.key]);
+  }, [target.key, playerReady]);
   function editMark(mark: VideoMark, x: number, y: number) {
     setMarkError("");
     setDraft({ id: mark.id, old: mark, kind: mark.kind, time: mark.time, trackId: mark.trackId,
@@ -467,13 +535,13 @@ function Panel({ target }: { target: VideoTarget }) {
     } catch (error) { setMarkError(String(error)); }
     finally { setMarkBusy(false); }
   }
-  async function deleteDraft() {
-    if (!draft?.old || !page || markBusy) return;
+  async function deleteMark(mark: VideoMark) {
+    if (!page || markBusy) return;
     setMarkBusy(true); setMarkError("");
     try {
-      const next = await request({ type: "video-delete", pageId: page.id, id: draft.old.id,
-        expectedUpdatedAt: draft.old.updatedAt, expectedMark: JSON.stringify(draft.old) });
-      setLibrary(next); setDraft(null);
+      const next = await request({ type: "video-delete", pageId: page.id, id: mark.id,
+        expectedUpdatedAt: mark.updatedAt, expectedMark: JSON.stringify(mark) });
+      setLibrary(next); if (draft?.old?.id === mark.id) setDraft(null);
     } catch (error) { setMarkError(String(error)); }
     finally { setMarkBusy(false); }
   }
@@ -484,7 +552,8 @@ function Panel({ target }: { target: VideoTarget }) {
       videoRect: { left: number; top: number; width: number; height: number } };
   }
   async function quickSave(kind: VideoMark["kind"]) {
-    if (!data || !data.cues.length || markBusy || (kind === "subtitle" && !quickNote.trim())) return;
+    if (markBusy || ((kind === "subtitle" || kind === "comment") && !quickNote.trim())) return;
+    if (kind === "subtitle" && !hasTranscript) return;
     setMarkBusy(true); setMarkError("");
     let resume = false, savedScroll: [number, number] | null = null;
     try {
@@ -521,14 +590,15 @@ function Panel({ target }: { target: VideoTarget }) {
             viewportWidth: innerWidth, viewportHeight: innerHeight };
         }
       }
-      const index = cueForTime(data.cues, time);
-      if (index < 0) throw Error("当前字幕为空，无法添加视频标注。");
-      const cue = data.cues[index];
+      if (!Number.isFinite(time) || time < 0) throw Error("无法读取当前播放时间，请等待视频加载后重试。");
+      const index = kind !== "comment" && hasTranscript ? cueForTime(data!.cues, time) : -1;
+      if (kind === "subtitle" && index < 0) throw Error("当前字幕为空，无法添加字幕批注。");
+      const cue = index >= 0 ? data!.cues[index] : undefined;
       const next = await request({ type: "video-save", videoKey: target.key, url: pageUrl, title: document.title, favicon: "",
-        mark: { kind, time, trackId: data.selected,
-          from: videoCueRef(cue, index),
-          to: videoCueRef(cue, index),
-          text: cue.text, note: quickNote, color: library ? initialHighlightColor(library) : "yellow" }, captureRect });
+        mark: { kind, time, trackId: cue ? data!.selected : undefined,
+          from: cue ? videoCueRef(cue, index) : undefined,
+          to: cue ? videoCueRef(cue, index) : undefined,
+          text: cue?.text ?? "", note: quickNote, color: library ? initialHighlightColor(library) : "yellow" }, captureRect });
       setLibrary(next); setQuickNote(""); setQuickExpanded(false);
     } catch (error) { setMarkError(String(error)); }
     finally {
@@ -551,15 +621,28 @@ function Panel({ target }: { target: VideoTarget }) {
         ) ?? [],
     [data, query],
   );
+  const followIndex = data?.cues.length ? cueForTime(data.cues, playbackTime) : -1;
+  useEffect(() => {
+    if (!following || !hasTranscript || collapsed || followIndex < 0) return;
+    if (query && !filtered.some(item => item.index === followIndex)) {
+      setQuery("");
+      return;
+    }
+    const frame = requestAnimationFrame(() => scrollCue(followIndex, true));
+    return () => cancelAnimationFrame(frame);
+  }, [following, followIndex, filtered, query, hasTranscript, collapsed, paragraphSeconds]);
   return (
     <section className="transcript" aria-label="LocalMark 字幕列表">
       <header>
         <button
           className="heading"
           aria-expanded={!collapsed}
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => {
+            if (!collapsed && sourcePopup.current?.matches(":popover-open")) sourcePopup.current.hidePopover();
+            setCollapsed(!collapsed);
+          }}
         >
-          <span>字幕列表</span>
+          <span>LocalMark</span>
           <span className="chevron">{collapsed ? "+" : "−"}</span>
         </button>
         <button
@@ -574,28 +657,42 @@ function Panel({ target }: { target: VideoTarget }) {
       {!collapsed && (
         <>
           <div className="body-shell">
-          {!!marks.length && <div className="annotation-rail" aria-label="视频标注位置">
+          {hasTranscript && !!marks.length && <div className="annotation-rail" aria-label="视频标注位置">
             {marks.map(mark => {
               const end = Math.max(data?.cues.at(-1)?.end ?? 1, ...marks.map(item => item.time + 0.01));
               return <button key={mark.id} type="button" style={{ top: `${Math.max(1, Math.min(98, mark.time / end * 100))}%`, background: colorInfo(mark.color).hex }}
-                title={`${mark.kind === "subtitle" ? "字幕标注" : mark.kind === "screenshot" ? "截图" : "关键帧"} ${subtitleTime(mark.time)} ${mark.text.slice(0, 80)} ${mark.note.slice(0, 80)}`}
+                title={`${videoMarkLabel(mark.kind)} ${subtitleTime(mark.time)} ${mark.text.slice(0, 80)} ${mark.note.slice(0, 80)}`}
                 aria-label={`滚动到${subtitleTime(mark.time)}的标注`}
                 onClick={() => void jumpRail(mark)} />;
             })}
           </div>}
-          <div ref={bodyRef} className="body" aria-busy={busy}>
-            {busy ? (
-              <p className="message" role="status">
-                {loadingStage}
-              </p>
-            ) : error ? (
-              <div className="message error" role="alert">
-                <strong>字幕加载失败</strong>
-                <p>{error}</p>
-                <button onClick={() => void load(undefined, true)}>
-                  重新加载
-                </button>
-              </div>
+          <div ref={bodyRef} className={`body${following ? " following" : ""}`} aria-busy={busy}>
+            {!hasTranscript ? (
+              <>
+                <div className={`message${error ? " error" : ""}`} role={error ? "alert" : "status"}>
+                  <strong>{busy ? loadingStage : error ? "字幕暂不可用" : "当前没有可显示的字幕"}</strong>
+                  {error && <><p>{error}</p><button type="button" onClick={() => void load(undefined, true)}>重新加载字幕</button></>}
+                  <p>仍可按当前播放时间截图、添加关键帧和评论。</p>
+                </div>
+                <div className="video-point-list" aria-label="视频时间点标注">
+                  {[...marks].sort((a, b) => a.time - b.time || a.createdAt.localeCompare(b.createdAt)).map(mark =>
+                    <article className="video-point-card" key={mark.id} data-mark-id={mark.id} style={{ "--annotation": colorInfo(mark.color).hex } as React.CSSProperties}>
+                      <button type="button" className="video-point-jump" title={`跳转到 ${subtitleTime(mark.time)} 并暂停`}
+                        onClick={() => void seek({ start: mark.time, end: mark.time + 0.001, text: "" })}>
+                        <span className="video-point-heading">
+                          {mark.kind === "screenshot" ? <ScreenshotImage mark={mark} size="comment" /> : <Icon name={mark.kind === "keyframe" ? "bookmark" : "comment"} size={15} />}
+                          <strong>{videoMarkLabel(mark.kind)} · {subtitleTime(mark.time)}</strong>
+                        </span>
+                        {mark.text && <span className="video-point-quote">{mark.text}</span>}
+                        {mark.note && <span className="video-point-note">{mark.note}</span>}
+                      </button>
+                      <button type="button" className="video-point-edit" aria-label={`编辑${videoMarkLabel(mark.kind)}`} disabled={markBusy}
+                        onClick={event => editMark(mark, event.clientX, event.clientY)}><Icon name="pen" size={14} /></button>
+                      <button type="button" className="video-point-delete" aria-label={`删除${videoMarkLabel(mark.kind)}`} disabled={markBusy}
+                        onClick={() => void deleteMark(mark)}><Icon name="trash" size={14} /></button>
+                    </article>)}
+                </div>
+              </>
             ) : (
               <>
                 {!filtered.length && (
@@ -634,18 +731,64 @@ function Panel({ target }: { target: VideoTarget }) {
         </>
       )}
       {!collapsed && <div className="video-quick-tools">
-        <button type="button" className="icon-button" aria-label="定位当前播放字幕" title="滚动字幕列表到当前播放位置" disabled={busy || !data?.cues.length} onClick={() => void locatePlaybackCue()}><Icon name="locate" size={17} /></button>
-        <button type="button" className="icon-button" aria-label="截图并标注" title="截图" disabled={markBusy || !data?.cues.length} onClick={() => void quickSave("screenshot")}><Icon name="image" size={17} /></button>
-        <button type="button" className="icon-button" aria-label="添加关键帧" title="关键帧" disabled={markBusy || !data?.cues.length} onClick={() => void quickSave("keyframe")}><Icon name="bookmark" size={17} /></button>
+        <button type="button" className={`icon-button locate-button${following ? " following" : ""}${holdingLocate ? " holding" : ""}`}
+          aria-label="定位当前播放字幕" aria-pressed={following}
+          title={following ? "正在跟随当前字幕；长按 2 秒退出，单击立即定位" : "单击定位当前字幕；长按 2 秒开启持续居中"}
+          disabled={busy || !data?.cues.length}
+          onPointerDown={event => {
+            if (!event.isPrimary || event.button !== 0) return;
+            locatePointer.current = event.pointerId;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            startLocateHold();
+          }}
+          onPointerMove={event => {
+            if (locatePointer.current !== event.pointerId) return;
+            const rect = event.currentTarget.getBoundingClientRect();
+            if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) {
+              suppressLocateClick.current = true;
+              stopLocateHold();
+            }
+          }}
+          onPointerUp={event => { if (locatePointer.current === event.pointerId) stopLocateHold(); }}
+          onPointerCancel={event => {
+            if (locatePointer.current === event.pointerId) {
+              suppressLocateClick.current = true;
+              stopLocateHold();
+            }
+          }}
+          onContextMenu={event => event.preventDefault()}
+          onKeyDown={event => {
+            if (event.key !== " " && event.key !== "Enter") return;
+            event.preventDefault();
+            if (!event.repeat) startLocateHold();
+          }}
+          onKeyUp={event => {
+            if (event.key !== " " && event.key !== "Enter") return;
+            event.preventDefault();
+            const held = suppressLocateClick.current;
+            stopLocateHold();
+            suppressLocateClick.current = false;
+            if (!held) void locatePlaybackCue();
+          }}
+          onBlur={stopLocateHold}
+          onClick={() => {
+            if (suppressLocateClick.current) { suppressLocateClick.current = false; return; }
+            void locatePlaybackCue();
+          }}>
+          {(holdingLocate || following) && <svg className="locate-progress" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" /></svg>}
+          <Icon name="locate" size={17} />
+        </button>
+        <button type="button" className="icon-button" aria-label="截图并标注" title="截图" disabled={markBusy} onClick={() => void quickSave("screenshot")}><Icon name="image" size={17} /></button>
+        <button type="button" className="icon-button" aria-label="添加关键帧" title="关键帧" disabled={markBusy} onClick={() => void quickSave("keyframe")}><Icon name="bookmark" size={17} /></button>
         <div className={`quick-input${quickExpanded ? " expanded" : ""}`}>
-          <textarea aria-label="当前字幕批注" placeholder="给当前字幕写批注…" value={quickNote} rows={1} maxLength={100000}
+          <textarea ref={quickInput} aria-label={hasTranscript ? "当前字幕批注" : "当前视频时间点评论"} aria-keyshortcuts="Shift+Enter" title="在页面按 Shift+Enter 快速输入" placeholder={hasTranscript ? "给当前字幕写批注…" : "给当前视频时间点写评论…"} value={quickNote} rows={1} maxLength={100000}
             onFocus={() => setQuickExpanded(true)} onChange={event => setQuickNote(event.target.value)}
-            onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void quickSave("subtitle"); } }} />
-          {quickExpanded && <button type="button" disabled={markBusy || !quickNote.trim()} onClick={() => void quickSave("subtitle")}>保存</button>}
+            onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void quickSave(hasTranscript ? "subtitle" : "comment"); } }} />
+          {quickExpanded && <button type="button" disabled={markBusy || !quickNote.trim()} onClick={() => void quickSave(hasTranscript ? "subtitle" : "comment")}>保存</button>}
         </div>
       </div>}
-      {markError && <p className="mark-error" role="alert">{markError}</p>}
-      <footer>
+      {!collapsed && markError && <p className="mark-error" role="alert">{markError}</p>}
+      {!collapsed && <footer>
         <button
           ref={sourceButton}
           className="icon-button source-toggle"
@@ -656,7 +799,6 @@ function Panel({ target }: { target: VideoTarget }) {
         >
           <Icon name="help" size={16} />
         </button>
-        {!collapsed && (
           <div className={`tools${searchOpen ? " search-open" : ""}`}>
             <label className="sr-only" htmlFor="lm-transcript-language">
               字幕语言
@@ -711,9 +853,8 @@ function Panel({ target }: { target: VideoTarget }) {
               </button>
             </div>
           </div>
-        )}
         <span className="build-version">v{__LOCALMARK_VERSION__}</span>
-      </footer>
+      </footer>}
       {draft && <div ref={composerRef} popover="manual" className={`video-editor${draft.expanded ? " expanded" : ""}`}
         role="dialog" aria-label={draft.id ? "编辑视频标注" : "新建字幕标注"}
         style={{ left: Math.max(8, Math.min(innerWidth - (draft.expanded ? 350 : 250), draft.x + 8)), top: Math.max(8, Math.min(innerHeight - 190, draft.y + 8)) }}>
@@ -724,7 +865,7 @@ function Panel({ target }: { target: VideoTarget }) {
               aria-label={colorInfo(color).name} aria-pressed={draft.color === color} title={`${colorInfo(color).name} · 保存标注`}
               style={{ background: colorInfo(color).hex }} onMouseDown={event => event.preventDefault()} onClick={() => void saveDraft(color)} />)}
           </div>
-          {draft.old && <button type="button" className="video-delete" disabled={markBusy} onClick={() => void deleteDraft()}>删除</button>}
+          {draft.old && <button type="button" className="video-delete" disabled={markBusy} onClick={() => void deleteMark(draft.old!)}>删除</button>}
           <button type="button" aria-label="关闭标注窗" disabled={markBusy} onClick={() => setDraft(null)}><Icon name="close" size={15} /></button>
         </div>
         <div className="video-editor-input">
@@ -861,6 +1002,15 @@ export function mountVideoTranscript() {
         mount = document.createElement("div");
       sheet.textContent = style;
       shadow.append(sheet, mount);
+      // A page sees the shadow host as the target of composed keyboard events.
+      // Keep typing keys inside the editor so video-site shortcuts cannot use them.
+      const keepTypingInside = (event: KeyboardEvent) => {
+        if (event.composedPath().some(node => node instanceof HTMLElement &&
+          (node.isContentEditable || node.matches("input, textarea, select"))))
+          event.stopPropagation();
+      };
+      for (const type of ["keydown", "keyup", "keypress"])
+        shadow.addEventListener(type, keepTypingInside as EventListener);
       root = createRoot(mount);
       key = target.key;
       root.render(<Panel key={key} target={target} />);

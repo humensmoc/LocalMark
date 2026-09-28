@@ -47,7 +47,8 @@ export async function elementChecks({ page, panel, context, base, out, until, ok
   const save = async note => {
     await editor.locator("#wc-note").fill(note);
     await editor.getByRole("button", { name: "保存", exact: true }).click();
-    await editor.waitFor({ state: "hidden" });
+    try { await editor.waitFor({ state: "hidden" }); }
+    catch (error) { throw Error(`${error.message}\n编辑窗：${await editor.innerText()}`); }
   };
   await toggle.waitFor();
   assert.equal(await panel.evaluate(() => !!document.querySelector(".element-toolbar")), false);
@@ -178,6 +179,31 @@ export async function elementChecks({ page, panel, context, base, out, until, ok
   assert.deepEqual(await page.locator("#card-image").boundingBox(), imageBefore);
   await page.locator("#card-image").hover();
   const imageMark = (await marks()).find(m => m.anchor.kind === "element" && m.anchor.tag === "img");
+  assert.match(imageMark.imagePath, new RegExp(`^media/${(await savedPage()).id}/${imageMark.id}\\.png$`));
+  const imageFile = async path => panel.evaluate(async path => {
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("LocalMark QA");
+    const [folder, id, name] = path.split("/");
+    try {
+      const file = await (await (await root.getDirectoryHandle(folder)).getDirectoryHandle(id)).getFileHandle(name);
+      const blob = await file.getFile();
+      return { type: blob.type, size: blob.size, signature: [...new Uint8Array(await blob.slice(0, 8).arrayBuffer())] };
+    } catch (error) {
+      if (error.name === "NotFoundError") return null;
+      throw error;
+    }
+  }, path);
+  await until(async () => (await imageFile(imageMark.imagePath))?.size > 0, "selected image saved to media directory");
+  const file = await imageFile(imageMark.imagePath);
+  assert.equal(file.type, "image/png");
+  assert.deepEqual(file.signature, [137, 80, 78, 71, 13, 10, 26, 10]);
+  await until(() => panel.evaluate(() => !!document.querySelector('.card.current img[alt="网页图片"]')), "saved image visible in sidebar");
+  await panel.evaluate(() => {
+    const scroll = document.querySelector(".tabs + .scroll");
+    const card = document.querySelector('.card.current img[alt="网页图片"]').closest(".card.current");
+    scroll.scrollTop += card.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 10;
+  });
+  await until(() => panel.evaluate(() => document.querySelector('.card.current img[alt="网页图片"]').getBoundingClientRect().top < innerHeight - 240), "saved image scrolled into view");
+  await panel.screenshot("element-saved-image-sidebar.png");
   await tooltip.locator(`[data-hover-mark="${imageMark.id}"]`).waitFor();
   assert.equal(await tooltip.locator(`[data-hover-mark="${imageMark.id}"]`).textContent(), "图片自己的批注");
   assert.equal(await tooltip.locator(`[data-hover-mark="${elementMark.id}"]`).textContent(), "修改后的元素批注");
@@ -378,6 +404,7 @@ export async function elementChecks({ page, panel, context, base, out, until, ok
   await host.locator(`[data-element-mark="${imageMark.id}"] button`).click();
   await editor.getByRole("button", { name: "删除", exact: true }).click();
   await count(3);
+  await until(async () => (await imageFile(imageMark.imagePath)) === null, "deleted image file removed");
   await host.locator(`[data-element-mark="${imageMark.id}"]`).waitFor({ state: "hidden" });
   assert.equal((await marks()).filter(m => m.anchor.kind !== "element").length, 1);
   assert.ok((await marks()).some(m => m.id === elementMark.id));

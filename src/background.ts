@@ -21,6 +21,7 @@ import {
 import { videoTarget } from "./video-transcript";
 import { videoPageUrl } from "./video-marks";
 import { captureVideoImage, imagePreview } from "./video-capture";
+import { downloadElementImage } from "./element-image";
 import { DirectoryFiles } from "./files";
 import { deletePageData } from "./page-delete";
 import { SyncEngine } from "./sync";
@@ -201,14 +202,14 @@ async function videoMutation(m: Extract<Request, { type: "video-save" | "video-d
   try {
     if (!entry) {
       const title = (m.title || new URL(url).hostname).slice(0, 1000);
-      const page: Page = { schemaVersion: 4, id, url, originalUrl: m.url, title,
+      const page: Page = { schemaVersion: 5, id, url, originalUrl: m.url, title,
         favicon: /^https?:\/\//.test(m.favicon) ? m.favicon : "", folderName: folderName(title, id),
         createdAt: time, updatedAt: time, annotations: [], videoMarks: [], tags: [], category: DEFAULT_CATEGORY,
         categoryId: UNCATEGORIZED, tagIds: [] };
       entry = lib.entries[id] = { page, baseJson: null, baseMd: null, dirty: true, mdDirty: true };
     }
     migrateTaxonomy(lib);
-    entry.page.schemaVersion = 4;
+    entry.page.schemaVersion = 5;
     entry.page.videoMarks ??= [];
     if (old) entry.page.videoMarks[entry.page.videoMarks.findIndex(item => item.id === old.id)] = mark;
     else entry.page.videoMarks.push(mark);
@@ -225,7 +226,7 @@ async function videoMutation(m: Extract<Request, { type: "video-save" | "video-d
   void notify().catch(() => {});
   return lib;
 }
-async function handle(m: Request, sender: chrome.runtime.MessageSender) {
+async function handle(m: Request, sender: chrome.runtime.MessageSender, image?: { id: string; path: string }) {
   if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
   if (m.type === "dashboard") {
     const url = chrome.runtime.getURL("dashboard.html");
@@ -430,14 +431,15 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender) {
           : now;
       const mark = MarkSchema.parse({
         ...m.mark,
-        id: old?.id ?? crypto.randomUUID(),
+        id: old?.id ?? image?.id ?? crypto.randomUUID(),
+        imagePath: image?.path ?? (m.mark.anchor.kind === "element" && m.mark.anchor.tag === "img" ? old?.imagePath : undefined),
         createdAt: old?.createdAt ?? time,
         updatedAt: time,
         tags: old?.tags ?? [],
       });
       if (old) e.page.annotations[e.page.annotations.indexOf(old)] = mark;
       else e.page.annotations.push(mark);
-      if (mark.anchor.kind === "element") e.page.schemaVersion = 3;
+      if (mark.anchor.kind === "element" && e.page.schemaVersion < 3) e.page.schemaVersion = 3;
       e.page.updatedAt = time;
       e.dirty = true;
       e.mdDirty = true;
@@ -497,6 +499,61 @@ async function dispatch(m: Request | ImportRequest, sender: chrome.runtime.Messa
       if (isLibraryUI(sender)) await sync();
       return serial(() => videoMutation(m, sender));
     });
+  if (m.type === "save" && (m.imageSource !== undefined ||
+      (m.mark.id && m.mark.anchor.kind === "element"))) {
+    if (m.imageSource !== undefined && (m.mark.anchor.kind !== "element" || m.mark.anchor.tag !== "img"))
+      throw Error("只有图片元素可以保存图片文件。");
+    return serialFiles(async () => {
+      const url = canonicalUrl(m.url);
+      const current = await library();
+      const currentId = Object.values(current.entries).find(entry => entry.page.url === url)?.page.id ?? await pageId(url);
+      if (isLibraryUI(sender)) await sync(new Set([currentId]));
+      if (m.imageSource !== undefined) await videoRoot("readwrite");
+      const image = m.imageSource === undefined ? null : await downloadElementImage(m.imageSource);
+      return serial(async () => {
+        const lib = await library();
+        const entry = Object.values(lib.entries).find(item => item.page.url === url);
+        const id = entry?.page.id ?? currentId;
+        const old = m.mark.id ? entry?.page.annotations.find(mark => mark.id === m.mark.id) : undefined;
+        if (m.mark.id && (!old || old.updatedAt !== m.mark.expectedUpdatedAt || JSON.stringify(old) !== m.mark.expectedMark))
+          throw Error("此标注已在其他标签页或文件中修改，请刷新后再编辑。当前输入尚未保存。");
+        if (!old && m.mark.anchor.kind === "element" && m.mark.anchor.tag === "img" && !image)
+          throw Error("新图片标注缺少图片内容，请在网页重新选择图片。");
+        const oldPath = old?.imagePath;
+        if (!image && (!oldPath || (m.mark.anchor.kind === "element" && m.mark.anchor.tag === "img")))
+          return handle(m, sender);
+        const files = await videoRoot("readwrite");
+        const imageId = old?.id ?? crypto.randomUUID();
+        const path = image ? (oldPath ?? `media/${id}/${imageId}.png`) : oldPath!;
+        const backup = oldPath ? await files.readBlob(oldPath) : null;
+        if (image) await files.writeBlob(path, image);
+        else if (backup) await files.remove(path);
+        try { return await handle(m, sender, image ? { id: imageId, path } : undefined); }
+        catch (error) {
+          if (backup) await files.writeBlob(path, backup);
+          else if (image) await files.remove(path).catch(() => {});
+          throw error;
+        }
+      });
+    });
+  }
+  if (m.type === "delete") return serialFiles(async () => {
+    if (isLibraryUI(sender)) await sync(new Set([m.pageId]));
+    return serial(async () => {
+    const old = (await library()).entries[m.pageId]?.page.annotations.find(mark => mark.id === m.id);
+    if (!old?.imagePath) return handle(m, sender);
+    if (old.updatedAt !== m.expectedUpdatedAt || JSON.stringify(old) !== m.expectedMark)
+      throw Error("标注已改变，请刷新后重试");
+    const files = await videoRoot("readwrite");
+    const backup = await files.readBlob(old.imagePath);
+    if (backup) await files.remove(old.imagePath);
+    try { return await handle(m, sender); }
+    catch (error) {
+      if (backup) await files.writeBlob(old.imagePath, backup);
+      throw error;
+    }
+    });
+  });
   if (m.type === "import-metadata") {
     if (!isLibraryUI(sender)) throw Error("请在侧边栏或仪表盘中导入元数据。");
     const files = validateImportBatch(m.files);
@@ -553,8 +610,8 @@ async function dispatch(m: Request | ImportRequest, sender: chrome.runtime.Messa
   // Keep dashboard compare-before-edit behavior for fields with expected versions.
   // Tags are set operations and can be saved immediately; the writer checks disk conflicts.
   if (isLibraryUI(sender) &&
-      ["save", "delete", "page-comment", "page-category", "page-title", "page-rating"].includes(m.type)) {
-    const id = m.type === "delete" ? m.pageId : "url" in m ? await pageId(canonicalUrl(m.url)) : "";
+      ["save", "page-comment", "page-category", "page-title", "page-rating"].includes(m.type)) {
+    const id = "url" in m ? await pageId(canonicalUrl(m.url)) : "";
     return serialFiles(async () => {
       await sync(new Set([id]));
       return serial(() => handle(m, sender));
@@ -574,15 +631,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       error => reply({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
   }
-  if (message?.type === "video-image") {
+  if (message?.type === "video-image" || message?.type === "element-image") {
     void (async () => {
       if (sender.id !== chrome.runtime.id || typeof message.id !== "string") throw Error("请求无效。");
       const lib = await library();
-      const mark = Object.values(lib.entries).flatMap(entry => entry.page.videoMarks ?? [])
-        .find(mark => mark.id === message.id && mark.kind === "screenshot");
-      if (!mark?.imagePath) throw Error("截图记录不存在。");
-      const image = await (await videoRoot("read")).readBlob(mark.imagePath);
-      if (!image) throw Error("本地截图文件已移走。");
+      const path = message.type === "video-image"
+        ? Object.values(lib.entries).flatMap(entry => entry.page.videoMarks ?? [])
+          .find(mark => mark.id === message.id && mark.kind === "screenshot")?.imagePath
+        : Object.values(lib.entries).flatMap(entry => entry.page.annotations)
+          .find(mark => mark.id === message.id && mark.anchor.kind === "element" && mark.anchor.tag === "img")?.imagePath;
+      if (!path) throw Error("图片记录不存在。");
+      const image = await (await videoRoot("read")).readBlob(path);
+      if (!image) throw Error("本地图片文件已移走。");
       return imagePreview(image);
     })().then(data => reply({ ok: true, data }), error => reply({ ok: false, error: String(error) }));
     return true;
