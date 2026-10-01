@@ -22,6 +22,8 @@ import {
 } from "./transcript-layout";
 declare const __LOCALMARK_VERSION__: string;
 const HOST = "localmark-video-transcript";
+const THEME_STORAGE_KEY = "localmark.videoTranscriptTheme";
+type VideoTheme = "dark" | "light";
 type VideoDraft = {
   id?: string;
   old?: VideoMark;
@@ -45,7 +47,7 @@ function video(site: VideoTarget["site"]) {
       : ".bpx-player-video-wrap video, .bilibili-player-video video, .bpx-player-video-wrap bwp-video",
   );
 }
-function Panel({ target }: { target: VideoTarget }) {
+function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: VideoTheme; onToggleTheme: () => void }) {
   const [data, setData] = useState<Transcript | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(true),
@@ -110,7 +112,7 @@ function Panel({ target }: { target: VideoTarget }) {
       suppressLocateClick.current = true;
       setHoldingLocate(false);
       setFollowing(value => !value);
-    }, 2000);
+    }, 1000);
   }
   useEffect(() => () => {
     if (locateHoldTimer.current !== null) clearTimeout(locateHoldTimer.current);
@@ -733,7 +735,7 @@ function Panel({ target }: { target: VideoTarget }) {
       {!collapsed && <div className="video-quick-tools">
         <button type="button" className={`icon-button locate-button${following ? " following" : ""}${holdingLocate ? " holding" : ""}`}
           aria-label="定位当前播放字幕" aria-pressed={following}
-          title={following ? "正在跟随当前字幕；长按 2 秒退出，单击立即定位" : "单击定位当前字幕；长按 2 秒开启持续居中"}
+          title={following ? "正在跟随当前字幕；长按 1 秒退出，单击立即定位" : "单击定位当前字幕；长按 1 秒开启持续居中"}
           disabled={busy || !data?.cues.length}
           onPointerDown={event => {
             if (!event.isPrimary || event.button !== 0) return;
@@ -852,6 +854,12 @@ function Panel({ target }: { target: VideoTarget }) {
                 <Icon name={searchOpen ? "close" : "search"} size={18} />
               </button>
             </div>
+            <button type="button" className="icon-button theme-toggle"
+              aria-label="深色背景" aria-pressed={theme === "dark"}
+              title={theme === "dark" ? "切换为白色背景" : "切换为黑色背景"}
+              onClick={onToggleTheme}>
+              <Icon name={theme === "dark" ? "sun" : "moon"} size={18} />
+            </button>
           </div>
         <span className="build-version">v{__LOCALMARK_VERSION__}</span>
       </footer>}
@@ -924,13 +932,24 @@ export function mountVideoTranscript() {
   document.getElementById(HOST)?.remove();
   let host: HTMLElement | null = null,
     root: Root | null = null,
-    key = "";
+    key = "",
+    renderedTheme: VideoTheme | null = null,
+    themeOverride: VideoTheme | null = null,
+    manuallyChosen = false,
+    disposed = false;
+  const toggleTheme = () => {
+    themeOverride = host?.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    manuallyChosen = true;
+    update();
+    void chrome.storage.local.set({ [THEME_STORAGE_KEY]: themeOverride });
+  };
   function clear() {
     root?.unmount();
     host?.remove();
     root = null;
     host = null;
     key = "";
+    renderedTheme = null;
   }
   function update() {
     if (!chrome.runtime.id) {
@@ -1013,22 +1032,34 @@ export function mountVideoTranscript() {
         shadow.addEventListener(type, keepTypingInside as EventListener);
       root = createRoot(mount);
       key = target.key;
-      root.render(<Panel key={key} target={target} />);
     }
     const dark =
       target.site === "youtube"
         ? document.documentElement.hasAttribute("dark")
         : document.documentElement.classList.contains("dark") ||
           document.documentElement.getAttribute("data-theme") === "dark";
-    const theme = dark ? "dark" : "light";
+    const theme: VideoTheme = themeOverride ?? (dark ? "dark" : "light");
     if (host.getAttribute("data-theme") !== theme)
       host.setAttribute("data-theme", theme);
+    if (renderedTheme !== theme) {
+      root?.render(<Panel key={key} target={target} theme={theme} onToggleTheme={toggleTheme} />);
+      renderedTheme = theme;
+    }
     if (host.parentElement !== parent || host.nextElementSibling !== before)
       parent.insertBefore(host, before);
   }
   const timer = setInterval(update, 600);
   update();
+  void chrome.storage.local.get(THEME_STORAGE_KEY).then(values => {
+    if (disposed || manuallyChosen) return;
+    const saved = values[THEME_STORAGE_KEY];
+    if (saved === "dark" || saved === "light") {
+      themeOverride = saved;
+      update();
+    }
+  });
   return () => {
+    disposed = true;
     clearInterval(timer);
     clear();
   };

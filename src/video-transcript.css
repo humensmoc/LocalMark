@@ -263,7 +263,7 @@ header {
 .locate-button.following { color: var(--blue); background: var(--chip); }
 .locate-progress { position: absolute; inset: 0; width: 25px; height: 29px; overflow: visible; transform: rotate(-90deg); pointer-events: none; }
 .locate-progress circle { fill: none; stroke: var(--blue); stroke-width: 1.8; stroke-dasharray: 69.12; stroke-dashoffset: 0; }
-.locate-button.holding .locate-progress circle { stroke-dashoffset: 69.12; animation: locate-hold-progress 2s linear forwards; }
+.locate-button.holding .locate-progress circle { stroke-dashoffset: 69.12; animation: locate-hold-progress 1s linear forwards; }
 @keyframes locate-hold-progress { to { stroke-dashoffset: 0; } }
 .quick-input { position: relative; flex: 1; min-width: 0; }
 .quick-input textarea { display: block; width: 100%; height: 30px; min-height: 30px; resize: none; padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--input); color: var(--fg); font: 12px/1.5 Arial,"Microsoft YaHei",sans-serif; }
@@ -362,7 +362,8 @@ footer {
   margin-top: 4px;
 }
 .source-toggle,
-footer .search-toggle {
+footer .search-toggle,
+footer .theme-toggle {
   width: 28px;
   height: 28px;
 }

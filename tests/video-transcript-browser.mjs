@@ -11,7 +11,7 @@ const live = process.argv.includes("--live");
 const context = await chromium.launchPersistentContext(
   await mkdtemp(join(tmpdir(), "localmark-transcript-")),
   {
-    channel: "chromium",
+    channel: process.env.LOCALMARK_BROWSER_CHANNEL || "chromium",
     headless: true,
     viewport: { width: 1600, height: 1000 },
     args: ["--enable-unsafe-extension-debugging"],
@@ -192,6 +192,7 @@ try {
     await context.browser().newBrowserCDPSession()
   ).send("Extensions.loadUnpacked", { path: resolve("dist") });
   await manager.close();
+  await until(() => context.serviceWorkers().length > 0, "extension service worker");
   if (!live) {
     const extensionOrigin = context.serviceWorkers()[0].url().match(/^chrome-extension:\/\/[^/]+/)[0];
     const settings = await context.newPage();
@@ -275,6 +276,17 @@ try {
       continue;
     }
     assert.equal(await panel.locator(".cue").count(), 60);
+    const themeButton = panel.getByRole("button", { name: "深色背景" });
+    const initialTheme = await panel.getAttribute("data-theme");
+    await themeButton.click();
+    const selectedTheme = initialTheme === "dark" ? "light" : "dark";
+    await until(async () => await panel.getAttribute("data-theme") === selectedTheme, `${site} manual theme switch`);
+    assert.equal(await themeButton.getAttribute("aria-pressed"), String(selectedTheme === "dark"));
+    await p.waitForTimeout(750);
+    assert.equal(await panel.getAttribute("data-theme"), selectedTheme, "Website theme polling must not overwrite the manual choice");
+    assert.equal(await context.serviceWorkers()[0].evaluate(async () =>
+      (await chrome.storage.local.get("localmark.videoTranscriptTheme"))["localmark.videoTranscriptTheme"]), selectedTheme);
+    report.checks.push(`${site}: manual theme switch persists in extension storage and survives website theme polling`);
     if (site === "bilibili")
       assert.equal(
         await panel.getByLabel("字幕语言", { exact: true }).inputValue(),
@@ -324,16 +336,16 @@ try {
       });
       await p.mouse.move(center.x, center.y);
       await p.mouse.down();
-      await p.waitForTimeout(800);
+      await p.waitForTimeout(400);
       assert.equal(await locate.getAttribute("aria-pressed"), "false");
       const progress = await locate.locator(".locate-progress circle").evaluate(circle =>
         parseFloat(getComputedStyle(circle).strokeDashoffset));
       assert(progress > 0 && progress < 69.12, `Hold ring should be partway filled: ${progress}`);
       await p.mouse.up();
-      await p.waitForTimeout(1300);
+      await p.waitForTimeout(700);
       assert.equal(await locate.getAttribute("aria-pressed"), "false", "Releasing early cancels follow mode");
       await p.mouse.down();
-      await until(async () => await locate.getAttribute("aria-pressed") === "true", "enter follow mode after 2-second hold");
+      await until(async () => await locate.getAttribute("aria-pressed") === "true", "enter follow mode after 1-second hold");
       await p.mouse.up();
       await until(() => centered(43), "follow mode centers the current cue");
       await p.locator("video").evaluate(video => { video.currentTime = 59.4; video.pause(); });
@@ -342,7 +354,7 @@ try {
       await until(() => centered(0), "follow mode centers the first cue");
       await panel.screenshot({ path: join(out, "bilibili-following.png") });
       await p.mouse.down();
-      await until(async () => await locate.getAttribute("aria-pressed") === "false", "exit follow mode after 2-second hold");
+      await until(async () => await locate.getAttribute("aria-pressed") === "false", "exit follow mode after 1-second hold");
       await p.mouse.up();
       const stopped = await panel.locator(".body").evaluate(body => body.scrollTop);
       await p.locator("video").evaluate(video => { video.currentTime = 43.4; video.pause(); });
@@ -358,7 +370,7 @@ try {
       await p.keyboard.down("Space");
       await until(async () => await locate.getAttribute("aria-pressed") === "false", "keyboard hold exits follow mode");
       await p.keyboard.up("Space");
-      report.checks.push("Bilibili: partial ring, canceled hold, 2-second pointer and keyboard enter/exit, first/current/last cue centering, and stopped follow");
+      report.checks.push("Bilibili: partial ring, canceled hold, 1-second pointer and keyboard enter/exit, first/current/last cue centering, and stopped follow");
     }
     await p.locator("video").evaluate(async (v) => {
       await Promise.race([
