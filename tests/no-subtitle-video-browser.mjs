@@ -9,7 +9,7 @@ const out = resolve("test-results/no-subtitle-video");
 await mkdir(out, { recursive: true });
 const version = JSON.parse(await readFile("package.json", "utf8")).version;
 const context = await chromium.launchPersistentContext(await mkdtemp(join(tmpdir(), "lm-no-subtitle-")), {
-  channel: "chromium", headless: true, viewport: { width: 1440, height: 900 },
+  channel: process.env.LOCALMARK_TEST_BROWSER || "chromium", headless: true, viewport: { width: 1440, height: 900 },
   args: ["--enable-unsafe-extension-debugging"], ignoreDefaultArgs: ["--disable-extensions"],
 });
 const report = { version, checks: [], errors: [] };
@@ -36,6 +36,10 @@ await context.route("**/*", async route => {
       startMs: String(i * 1000), endMs: String((i + 1) * 1000), snippet: { runs: [{ text: `字幕 ${i}` }] },
     } })) } }) : route.fulfill({ status: 403, json: { error: { message: "No transcript" } } });
   }
+  if (u.pathname === "/api/timedtext")
+    return route.fulfill({ contentType: "application/json", json: { events: [
+      { tStartMs: 1000, dDurationMs: 2000, segs: [{ utf8: "播放器独立断句" }] },
+    ] } });
   if (u.hostname === "api.bilibili.com")
     return route.fulfill({ json: { code: 0, data: { bvid: "BVtest", aid: 123, cid: 1, page_no: 1,
       subtitle: { subtitles: subtitleReady.bilibili ? [{ id_str: "zh", lan: "zh", lan_doc: "中文",
@@ -271,6 +275,26 @@ try {
     else if (site === "bilibili") await page.evaluate(() => window.nativeBili("zh"));
     else await panel.getByRole("button", { name: "重试" }).click();
     await until(async () => await panel.locator(".cue").count() === 12, `${site} subtitles recovered`);
+    if (site === "youtube") {
+      await page.evaluate(() => {
+        document.querySelector("#movie_player").getPlayerResponse = () => ({
+          videoDetails: { videoId: "first" },
+          captions: { playerCaptionsTracklistRenderer: { captionTracks: [{
+            languageCode: "en", name: { simpleText: "English" },
+            baseUrl: "https://www.youtube.com/api/timedtext?v=first&lang=en",
+          }] } },
+        });
+      });
+      assert.equal(await panel.locator("#lm-transcript-language").count(), 0);
+      const [download] = await Promise.all([
+        page.waitForEvent("download"),
+        panel.getByRole("button", { name: "下载视频字幕 Markdown" }).click(),
+      ]);
+      const markdown = await readFile(await download.path(), "utf8");
+      assert(markdown.includes("## 内容转文字") && markdown.includes("字幕 0"));
+      assert(markdown.includes("## 播放器字幕") && markdown.includes("播放器独立断句"));
+      report.checks.push("youtube: one Markdown download contains native and player subtitles");
+    }
     await until(async () => await panel.locator(".cue-marker").count() === 2, `${site} time points remapped`);
     assert.equal(await panel.locator('.cue-marker button[aria-label^="视频评论"]').count(), 1);
     report.checks.push(`${site}: no-subtitle screenshot hover preview, full collapse, LocalMark heading, Shift+Enter focus, keyframe, comment, edit, delete, seek, v5 storage, 320px, subtitle recovery`);

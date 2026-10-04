@@ -315,7 +315,7 @@ async function context(sender: chrome.runtime.MessageSender, key: string) {
   return { tabId, frameUrl: ctx.frameUrl };
 }
 export async function gdcTranscriptRequest(
-  message: { key: string; trackId?: string; refresh?: boolean },
+  message: { key: string; refresh?: boolean },
   sender: chrome.runtime.MessageSender,
 ): Promise<Transcript> {
   const { tabId, frameUrl } = await context(sender, message.key);
@@ -352,12 +352,9 @@ export async function gdcTranscriptRequest(
     }
     if (!tracks.length) throw Error("此 GDC Vault 视频未提供字幕文件。");
     const selected =
-      (message.trackId ? tracks.find((t) => t.id === message.trackId) : null) ||
       tracks.find((t) => info.language && t.language === info.language) ||
       tracks.find((t) => t.default) ||
       tracks[0];
-    if (message.trackId && selected.id !== message.trackId)
-      throw Error("所选字幕轨道已失效，请重新加载。");
     const body = await fetchText(
       selected.id,
       controller.signal,

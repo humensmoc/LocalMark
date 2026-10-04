@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "本地摘录 · Web Clipper",
   "description": "在网页上高亮、批注和分类，将每页摘录自动保存到本地 Markdown 与 JSON。",
-  "version": "0.3.32",
+  "version": "0.3.43",
   "minimum_chrome_version": "128",
   "permissions": [
     "storage",

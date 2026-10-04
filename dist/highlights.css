@@ -23,6 +23,10 @@
   color: #18211c;
   text-decoration: underline;
 }
+::highlight(wc-draft-selection) {
+  background: Highlight;
+  color: HighlightText;
+}
 ::highlight(wc-note-yellow) { text-decoration: underline wavy #ad7800; }
 ::highlight(wc-note-green) { text-decoration: underline wavy #278254; }
 ::highlight(wc-note-blue) { text-decoration: underline wavy #237cad; }

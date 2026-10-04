@@ -4,13 +4,101 @@
 
 ## 阅读说明
 
-- 当前核对版本：**0.3.32**。package、lock 顶层/根包及 public/dist manifest 一致，内容脚本与侧栏内嵌构建版本同步。重新加载扩展并刷新网页后应核对 v0.3.32；本地验证不代表用户当前页面已更新。
+- 当前核对版本：**0.3.43**。package、lock 顶层/根包及 public/dist manifest 一致，内容脚本与侧栏内嵌构建版本同步。重新加载扩展并刷新网页后应核对 v0.3.43；本地验证不代表用户当前页面已更新。
 - 早期使用 `1.0.0`—`1.0.10`，2026-09-17 明确尚未正式发布，纠正为 `0.1.10`，之后使用 `0.x.y`。以下保留真实旧编号，按演进时间倒序，而非按主版本数值排序。
 - 历史依据为 Codex 对话、当前仓库 Git 历史及 [TESTING.md](TESTING.md)。下文“历史验证”仅转述当时记录，本次建档没有重新运行产品测试。对话来源编号见文末。
 - `0.2.9`、`0.2.18` 是可确认的中间构建；`0.2.19` 已交付卡片调整，但翻译功能最终以 `0.2.21` 整合交付。不能把版本递增次数等同于独立发布次数。
 - 每版写明实际改动、验证和限制。无插件功能改动的讨论、文档调整与排查，在当前版本的“会话补充”中按回合追加；待办不计作已实现功能。
 
 ## 0.3 系列：字幕段落阅读与标注交互
+
+### 0.3.43 · 2026-10-03 · 修复拼音首字母脱离组合输入
+
+- 新建文字高亮浮窗挂载后立即聚焦批注 textarea，移除等到首个可打印 `keydown` 才切换焦点的逻辑，使输入法能从第一个拼音按键开始就在同一输入元素中建立 composition，避免首字母被单独拆出。
+- 为兼顾原来的选区反馈与复制，新建标注会缓存所选 Range，并用独立的 CSS Custom Highlight 绘制临时选区，不再把浏览器活动 Selection 强行恢复到已聚焦的 textarea 之外；批注为空且输入框内没有主动选区时，`Command/Ctrl+C` 仍复制原文。第一次实际编辑后临时高亮与原文复制代理立即停止，恢复 textarea 的正常选择和复制语义。
+- 浏览器专项允许通过 `LOCALMARK_TEST_BROWSER=chrome` 使用本机 Chrome；同步调整布局断言的 1px 亚像素容差。初次尝试恢复原生活动 Selection 会导致字符无法进入 textarea，已在最终方案中撤销并改用 CSS Highlight。
+- 从 0.3.42 递增至 0.3.43，同步 package、lock 顶层/根包、public/dist manifest，并重新构建 dist；保留工作区其他未提交改动，未提交 Git。
+- 验证：Vitest 25 个测试文件、261 项测试通过，`npm run build`、`git diff --check` 通过；使用本机 Chrome 运行完整标注浮窗浏览器专项通过，确认浮窗出现后首键前 textarea 已聚焦、临时选区可见、空批注可复制原文、首次输入进入批注框并取消临时选区，以及原有多行输入、组合态 Enter、拖动、调色、窄屏和删除流程无回归。自动化未调用 macOS 系统拼音候选窗，用户当前网页仍需重新加载扩展并刷新后现场核对实际拼音输入。
+- 会话日志：按强制技能检查，配置的 `D:/Software/ObsidianSyncVault/快捷指令/对话日志` 在当前 macOS 环境不是有效绝对路径，本轮未写入集中日志，未改用其他目录。
+
+#### 会话补充
+
+- 2026-10-03 · `bookmark-read-later-product-boundary`：针对“只收藏”与“以后有空看”的轻量需求讨论与现有标注资料库的边界。建议保持单一网页记录，把“收藏”作为长期保留意图、“稍后看”作为可完成的阅读队列，高亮、批注、评论、分类与评分继续属于深度整理层；三者用独立入口和视图呈现，底层不重复建档。稍后看完成后可选保留为收藏或移出，产生标注时自然进入资料库。本轮仅产品方案与只读核对，无插件功能改动，不升版、不构建、不运行产品测试。
+
+### 0.3.42 · 2026-10-01 · 一次下载 YouTube 两种字幕来源
+
+- 修正 0.3.41 下载仅包含原生“内容转文字”的遗漏。YouTube 点击一次“下载字幕”会保留当前已加载的原生文稿，再单独读取当前播放器的 timed-text 字幕，生成一个 Markdown 文件，分别列出“内容转文字”和“播放器字幕”两节及各自 cue 时间戳；两种断句不混合。Bilibili/GDC Vault 仍下载当前自动选中的单一字幕来源，手动语言切换下拉框保持移除。
+- 恢复 YouTube `/api/timedtext` 响应的只读捕获；播放器下载优先使用与当前视频及语言匹配的已捕获响应，缺失时请求经验证的 YouTube 字幕地址，支持 JSON3/XML。下载前校验视频身份与字幕地址；播放器字幕不可用时显示错误，不生成冒充双来源的部分文件。
+- 从 0.3.41 递增至 0.3.42，同步 package、lock 顶层/根包、public/dist manifest 并重建 dist；保留其他未提交改动，未提交 Git。
+- 验证：Vitest 25 个测试文件、261 项测试通过；`npm run build`、`git diff --check` 通过。使用本机已安装 Chrome 运行隔离浏览器专项，确认一次下载的 Markdown 同时含两节不同文字，且 Bilibili/GDC Vault 旧流程通过、页面无脚本错误。真实 YouTube 页面仍需重载扩展后现场验证播放器字幕是否由网站提供可读取响应。
+- Playwright 环境：npm 软件包已在项目中；其专用 Chromium 缓存缺失，但本机 Chrome 可用于测试，不要求用户为使用下载功能安装 Playwright。集中日志技能配置的 Windows `D:/Software/ObsidianSyncVault/快捷指令/对话日志` 在当前 macOS 环境不是有效绝对路径，本轮按技能未写入集中日志。
+
+#### 会话补充
+
+- 2026-10-03 · `annotation-ime-first-letter-diagnosis`：用户反馈选中文字出现高亮批注浮窗后直接使用拼音输入，首字母会脱离后续拼音组合。只读核对确认：新建文字标注为了保留网页选区供复制，浮窗出现时不聚焦 textarea，而是在捕获到第一个可打印 `keydown`（含 `Process`）后才调用 `focus()`；IME 正在用该首键建立 composition 时焦点被切换，首键与后续组合输入因此可能被浏览器拆开。现有浏览器测试只覆盖普通英文首键触发聚焦，以及输入框已聚焦后的组合态 Enter，不覆盖未聚焦状态下的真实拼音首键。本轮仅诊断，尚未实施修复；无插件功能改动，不升版、不构建、不运行产品测试。
+- 2026-10-03 · `annotation-ime-focus-solution-discussion`：补充说明修复方式：浮窗提交挂载后立即通过现有 `Floating` 的 `focusRef`/`useLayoutEffect` 聚焦 textarea，并移除依赖首个可打印 `keydown` 才聚焦的路径，使 IME 的第一次拼音按键从一开始就在同一编辑元素中建立 composition。为兼顾原有选区复制，需要缓存已选文字，并在批注尚未输入时处理复制事件；若还要保持可见选区，则用独立绘制而不是依赖浏览器活动 Selection。本轮仅讨论方案，尚未实施；无插件功能改动，不升版、不构建、不运行产品测试。
+
+### 0.3.41 · 2026-10-01 · 字幕 Markdown 下载取代手动语言切换
+
+- 在视频面板底部原语言选择位置改为“下载字幕”按钮。字幕成功加载后，可将当前视频的完整字幕 cue（不受搜索筛选影响）、时间戳、视频链接和来源下载为 UTF-8 Markdown；字幕不可用时禁用按钮，不生成空文件。文件名包含视频标题和视频标识，并清理不合法字符。
+- 移除手动语言/字幕来源下拉框及客户端选轨、重试保留选轨和旧标注触发选轨的流程；同时移除 YouTube 播放器 timed-text 捕获与独立读取、原生文稿语言切换操作，并去除 Bilibili/GDC 请求中的手动选轨参数。YouTube 回到网站原生“内容转文字”，Bilibili/GDC 自动跟随播放器当前语言或默认轨道。旧标注仍保留 trackId 数据；来源不匹配时提示无法按文字定位，不自动改换字幕来源。
+- 从 0.3.40 递增至 0.3.41，同步 package、lock 顶层/根包、public/dist manifest 并重建 dist；保留其他未提交改动，未提交 Git。
+- 验证：Vitest 25 个测试文件、256 项测试通过；`npm run build` 与 `git diff --check` 通过。浏览器专项未运行成功：本机缺少测试所需 Playwright Chromium，可执行程序不存在；真实网页下载及布局仍需重载扩展后验证。
+- 会话日志：按强制技能检查，配置的 `D:/Software/ObsidianSyncVault/快捷指令/对话日志` 在当前 macOS 环境既不是绝对路径也不存在，按技能停止本轮集中日志写入；未自动改用其他路径。
+
+### 0.3.40 · 2026-10-01 · 字幕读取失败时保留语言与来源选择
+
+- 修复首次读取 YouTube 字幕失败后底部语言选择框消失的问题。读取器在文稿暂不可用或播放器字幕读取失败时仍返回当前可识别的内容转文字和播放器字幕轨道；侧栏显示读取错误及空字幕状态，同时保留选择框，使用户可切换来源再尝试加载。视频不匹配等无法确认轨道的错误仍不伪造选项。
+- 从 0.3.39 递增至 0.3.40，同步 package、lock 顶层/根包、public/dist manifest 并重建 dist；保留其他未提交改动，未提交 Git。
+- 验证：Vitest 24 个测试文件、255 项测试通过；`npm run build`、`git diff --check` 通过。新增初次读取失败仍可切换来源的组件测试与原生文稿未就绪时返回轨道清单的读取器测试。真实 YouTube 页面需重载扩展、刷新网页后核对选择框与实际字幕读取情况；本地测试不能证明用户页面已更新。
+- 会话日志：按项目规定读取日志技能；技能配置的 Windows `D:/Software/ObsidianSyncVault/快捷指令/对话日志` 在当前 macOS 环境不是有效绝对路径，本轮未写入集中日志，待用户确认/更新配置。
+
+### 0.3.39 · 2026-10-01 · 保留用户选择的字幕来源
+
+- 修复播放器字幕切换后被原生 timed-text 捕获通知覆盖的问题：后台刷新、播放器字幕响应到达及重试现在都保留当前选中的 trackId，不会把播放器来源无意重置为默认“内容转文字”。重试也保留当前来源；两种来源继续按 30 秒原则合并。
+- 从 0.3.38 递增至 0.3.39，同步 package、lock 顶层/根包、public/dist manifest 并重建 dist；保留其他未提交改动，未提交 Git。
+- 验证：完整测试和构建完成后记录结果；真实 YouTube 页面需重载扩展后现场确认选择播放器来源后内容不再回退。
+
+### 0.3.38 · 2026-10-01 · 恢复两种字幕来源的 30 秒段落合并
+
+- 撤回 0.3.37 将播放器 cue 逐条显示的行为。内容转文字和播放器字幕现在都按原有 30 秒时间桶合并；区别只在于每个来源提供的 cue 文本和 cue 边界，段内拼接使用所选来源的数据。
+- 从 0.3.37 递增至 0.3.38，同步 package、lock 顶层/根包、public/dist manifest 并重建 dist；保留其他未提交改动，未提交 Git。
+- 验证：完整 Vitest 24 个测试文件、253 项测试通过，`npm run build` 与 `git diff --check` 通过；真实 YouTube 页面仍需重载扩展后现场核对播放器来源的段内断句。
+
+### 0.3.37 · 2026-10-01 · 播放器字幕保留原始 cue 边界
+
+- 播放器字幕来源现在保留 YouTube timed-text 的原始 cue 边界，不再继续按 LocalMark 默认 30 秒合并；切回“内容转文字”后恢复原有时间段落合并规则。这样切换来源后可以直接看到播放器 cue 的断句变化。
+- 从 0.3.36 递增至 0.3.37，同步 package、lock 顶层/根包、public/dist manifest 并重建 dist；保留其他未提交改动，未提交 Git。
+- 验证：完整 Vitest 24 个测试文件、254 项测试通过，`npm run build` 与 `git diff --check` 通过；真实 YouTube 页面仍需重载扩展后现场核对。
+
+### 0.3.36 · 2026-10-01 · 捕获并复用 YouTube 播放器 timed-text 请求
+
+- YouTube 播放器字幕不再只依赖直接请求 `captionTracks[].baseUrl`：`video-native` 在 document_start 的 MAIN world 同时观察 `/api/timedtext` 的 fetch/XHR 响应，保留当前视频的 JSON3 或 XML 字幕内容；选择播放器字幕时优先复用已捕获响应，未捕获时再尝试 baseUrl。这样可覆盖需要 player proof token、直接 baseUrl 返回空内容的公开视频。
+- 从 0.3.35 递增至 0.3.36，同步 package、lock 顶层/根包、public/dist manifest 并重建 dist；保留其他未提交改动，未提交 Git。
+- 验证：完整 Vitest 24 个测试文件、253 项测试通过，`npm run build` 与 `git diff --check` 通过；真实 YouTube 页面需重载扩展和页面，使 document_start 捕获逻辑先于播放器请求安装。
+
+### 0.3.35 · 2026-10-01 · 修复播放器 XML 字幕的 Trusted Types 解析失败
+
+- YouTube 播放器字幕返回 XML 时不再调用受 Trusted Types 限制的 `DOMParser.parseFromString`，改用受限的 XML `<text>` 节点解析并解码常见 XML 实体；保留 JSON3 解析路径。修复截图中的 `document requires 'TrustedHTML' assignment`，播放器字幕失败时不再直接进入“字幕暂不可用”。
+- 从 0.3.34 递增至 0.3.35，同步 package、lock 顶层/根包、public/dist manifest 并重建 dist；保留其他未提交改动，未提交 Git。
+- 验证：完整 Vitest 24 个测试文件、253 项测试通过，`npm run build` 与 `git diff --check` 通过；播放器 JSON3 与 XML timed-text 单元测试均通过。真实 YouTube 页面仍需重载扩展后现场复核。
+
+### 0.3.34 · 2026-10-01 · YouTube 播放器字幕与文稿来源切换
+
+- 保留原有 YouTube `get_transcript`/“内容转文字”来源，同时读取播放器 `captionTracks` 的 timed-text 字幕。字幕语言下拉框现在同时列出“语言 · 内容转文字”和“语言 · 播放器字幕”，切换播放器来源后使用播放器字幕 cue；切回文稿来源时按需重新打开原生文稿面板。播放器字幕支持 YouTube JSON3 与 XML timed-text 响应。
+- 从 0.3.33 递增至 0.3.34，同步 package、lock 顶层/根包、public/dist manifest 并重建 dist；保留其他未提交改动，未提交 Git。
+- 验证：完整 Vitest 24 个测试文件、252 项测试通过，`npm run build` 与 `git diff --check` 通过；YouTube 字幕单元测试覆盖播放器 timed-text JSON3 读取、来源切换与原生面板关闭。真实 YouTube 页面是否提供可读取的 caption track 仍需用户重载扩展后现场核对。
+
+### 0.3.33 · 2026-10-01 · 自动关闭插件打开的 YouTube 原生文稿面板
+
+- 记录由插件点击打开的 YouTube“内容转文字/在此视频中”面板；字幕读取成功后自动点击原生关闭按钮，避免页面加载或插件刷新后面板持续占用右下角。用户自行打开的原生文稿面板不会被插件关闭；刷新字幕时会重新建立本次插件打开状态。
+- 从 0.3.32 递增至 0.3.33，同步 package、lock 顶层/根包、public manifest，并重建 dist；保留其他未提交改动，未提交 Git。
+- 验证：完整 Vitest 24 个测试文件、251 项测试通过，`npm run build` 与 `git diff --check` 通过；用户当前网页实际版本仍需重新加载扩展并刷新 YouTube 页面核对。
+
+#### 会话补充
+
+- 2026-10-01 · `youtube-transcript-segmentation-question`：用户询问 YouTube 原生字幕分段与 LocalMark 分句不一致的原因。只读核对源码：YouTube 原生文稿保留网站返回的字幕 cue；LocalMark 默认按 cue 起始时间每 30 秒分组成段，并仅按中英文标点规则拼接。说明截图中的 11:32、12:02 是 LocalMark 的时间桶边界，可在设置页“视频字幕”中改为 1～600 秒；本轮无插件功能改动，不升版、不构建、不运行产品测试。
+- 2026-10-01 · `youtube-transcript-sentence-boundary-question`：用户进一步指出同一语音在播放器字幕中显示为“now permanent notes”，而 LocalMark 中与前后文合并为“book I will keep it here now permanent notes”。补充核对：LocalMark读取的是 YouTube `get_transcript`/“内容转文字”文稿 cue，不是播放器画面上的 timed-text 渲染 cue；两者由 YouTube 不同的展示/切分数据生成，因此词序内容可能相同但断句边界不同。LocalMark本身只保留 cue 文本和时间，不执行语义断句。本轮无插件功能改动，不升版、不构建、不运行产品测试。
 
 ### 0.3.32 · 2026-10-01 · 视频面板手动切换明暗主题与一秒长按
 

@@ -17,7 +17,7 @@ description: 将不同项目的每轮 AI 对话汇总到指定日志目录，并
 将下面的 `log_root` 改为集中存放日志的**现有文件夹的绝对路径**；它就是日志根目录，不再额外拼接“对话日志”。复制到其他项目时保留或更新此配置。
 
 ```yaml
-log_root: 'D:/Software/ObsidianSyncVault/快捷指令/对话日志'
+log_root: '/Users/ahs/Documents/快捷指令/对话日志'
 ```
 
 - 整个 Skill 文件夹（含 `scripts/`）可以复制到其他项目的 `.agents/skills/conversation-topic-logger/`，也可以安装到用户级 Skill 目录。脚本路径一律相对**本次实际读取的 SKILL.md 所在目录**解析，不依赖当前工作目录。

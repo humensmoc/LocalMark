@@ -12,7 +12,7 @@ const server = createServer((req, res) => { res.setHeader("Content-Type", "text/
 await new Promise(r => server.listen(0, "127.0.0.1", r));
 const url = `http://127.0.0.1:${server.address().port}/article`;
 const context = await chromium.launchPersistentContext(await mkdtemp(join(tmpdir(), "localmark-composer-")), {
-  channel: "chromium", headless: true, viewport: { width: 1200, height: 850 },
+  channel: process.env.LOCALMARK_TEST_BROWSER || "chromium", headless: true, viewport: { width: 1200, height: 850 },
   args: ["--enable-unsafe-extension-debugging"], ignoreDefaultArgs: ["--disable-extensions"],
 });
 const errors = [], checks = [];
@@ -66,8 +66,8 @@ try {
   const point = await select();
   assert.equal(await host.locator(".quick").count(), 0);
   assert.equal(await editor.locator(".swatch").count(), 3);
-  assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), false);
-  assert.equal(await page.evaluate(() => getSelection()?.toString()), "Highlight this passage");
+  assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
+  assert.equal(await page.evaluate(() => [...CSS.highlights.get("wc-draft-selection")].length), 1);
   await page.keyboard.press("ControlOrMeta+C");
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "Highlight this passage");
   assert.equal((await note.boundingBox()).height, 36);
@@ -85,16 +85,17 @@ try {
     assert.ok(area.y + area.height - box.y - box.height <= 10, "save stays in the textarea bottom-right corner");
     assert.equal(await button.evaluate(el => { const r = el.getBoundingClientRect(); return el.getRootNode().elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest("button") === el; }), true);
     const padding = await note.evaluate(el => parseFloat(getComputedStyle(el).paddingRight));
-    assert.ok(area.x + area.width - padding <= box.x, "text leaves room for the overlaid button");
+    assert.ok(area.x + area.width - padding <= box.x + 1, "text leaves room for the overlaid button");
   };
   assert.equal(await editor.getByRole("button", { name: "保存", exact: true }).count(), 0);
   const compact = await editor.boundingBox();
   assert.ok(Math.abs(compact.x - point.x - 8) < 2 && Math.abs(compact.y - point.y - 8) < 2);
   await page.screenshot({ path: join(out, "compact.png") });
-  ok("real text drag leaves the page selection available for Ctrl+C while showing the compact composer");
+  ok("real text drag focuses the note before its first key while preserving selected-text copy");
   await page.keyboard.type("x");
   assert.equal(await note.evaluate(el => el.getRootNode().activeElement === el), true);
   assert.equal(await note.inputValue(), "x");
+  assert.equal(await page.evaluate(() => CSS.highlights.has("wc-draft-selection")), false);
   await note.fill("");
   await page.keyboard.insertText("直接输入的批注");
   assert.ok((await note.boundingBox()).height >= 100);

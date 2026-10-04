@@ -43,8 +43,8 @@ export function subtitleTime(seconds: number) {
 // this function: the isolated content script cannot read the site's player data.
 export async function readVideoTranscript(
   expectedKey: string,
-  trackId?: string,
   refresh = false,
+  source: "native" | "player" = "native",
 ): Promise<Transcript | { error: string }> {
   try {
     type Obj = Record<string, any>;
@@ -61,7 +61,10 @@ export async function readVideoTranscript(
     if (!id || key !== expectedKey)
       throw Error("视频已切换，正在等待当前视频数据，请重试。");
     const native = w.__localmarkNativeSubtitles;
-    if (refresh && native) native.openedKey = "";
+    if (refresh && native) {
+      native.openedKey = "";
+      native.openedByLocalMarkKey = "";
+    }
     const records: Obj[] = (native?.records || []).filter(
       (r: Obj) => r.key === key,
     );
@@ -187,13 +190,11 @@ export async function readVideoTranscript(
           '.bpx-player-ctrl-subtitle-menu-item.bpx-state-active,.bpx-player-ctrl-subtitle-menu-item.active,.bpx-player-ctrl-subtitle-menu-item[aria-checked="true"]',
         )
         ?.textContent?.trim();
-      const chosen = trackId
-        ? available.find((t) => trackKey(t) === trackId)
-        : available.find((t) => t.lan_doc === selectedLabel) ||
-          available.find((t) => addressOf(t) === active?.url) ||
-          available[0];
+      const chosen = available.find((t) => t.lan_doc === selectedLabel) ||
+        available.find((t) => addressOf(t) === active?.url) ||
+        available[0];
       if (!chosen)
-        throw Error("所选字幕已不在当前播放器的字幕选项中，请重新选择。");
+        throw Error("当前播放器没有可读取的字幕选项。");
       const address = new URL(addressOf(chosen));
       if (
         address.protocol !== "https:" ||
@@ -240,6 +241,79 @@ export async function readVideoTranscript(
       player?.getVideoData?.()?.video_id || flexy?.getAttribute("video-id");
     if (liveId && liveId !== id)
       throw Error("视频已切换，正在等待当前视频数据，请重试。");
+    if (source === "player") {
+      const playerResponse = player?.getPlayerResponse?.() || w.ytInitialPlayerResponse;
+      if (playerResponse?.videoDetails?.videoId && playerResponse.videoDetails.videoId !== id)
+        throw Error("播放器仍是上一个视频，无法下载当前视频的字幕。");
+      const captionTracks: Obj[] = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+      let active: Obj | undefined;
+      try { active = player?.getOption?.("captions", "track"); } catch { /* Use the first available track. */ }
+      const track = captionTracks.find((candidate) => active && (
+        candidate.vssId === active.vssId || candidate.languageCode === active.languageCode
+      )) || captionTracks[0];
+      if (!track) throw Error("当前视频没有可读取的播放器字幕。");
+      const baseUrl = typeof track.baseUrl === "string" ? track.baseUrl : "";
+      if (!baseUrl) throw Error("YouTube 播放器字幕地址不可用，请刷新视频后重试。");
+      const address = new URL(baseUrl, location.href);
+      if (address.protocol !== "https:" || !/^(www\.)?youtube\.com$/.test(address.hostname) || address.pathname !== "/api/timedtext")
+        throw Error("播放器返回了不受支持的字幕地址。");
+      if (address.searchParams.get("v") && address.searchParams.get("v") !== id)
+        throw Error("播放器字幕属于其他视频，请刷新页面后重试。");
+      address.searchParams.set("fmt", "json3");
+      const captured = records.filter((record) => {
+        if (record.type !== "youtube-player" || record.status !== 200) return false;
+        try {
+          const candidate = new URL(record.url);
+          return candidate.searchParams.get("lang") === track.languageCode &&
+            candidate.searchParams.get("kind") === new URL(baseUrl).searchParams.get("kind");
+        } catch { return false; }
+      }).at(-1);
+      let body: any = captured?.data;
+      if (body === undefined || body === "") {
+        let response: Response;
+        try {
+          response = await fetch(address.href, { credentials: "omit", signal: AbortSignal.timeout(12000) });
+        } catch { throw Error("YouTube 播放器字幕无法连接，请重试。"); }
+        if (!response.ok) throw Error(`YouTube 播放器字幕返回 HTTP ${response.status}。`);
+        body = await response.text();
+      }
+      let data: any = body;
+      if (typeof body === "string") {
+        try { data = JSON.parse(body); } catch { data = null; }
+      }
+      const cues: SubtitleCue[] = [];
+      if (data && typeof data === "object") {
+        for (const event of data.events || []) {
+          const value = (event.segs || []).map((segment: Obj) => String(segment.utf8 || "")).join("");
+          if (!value.trim()) continue;
+          const start = Number(event.tStartMs) / 1000;
+          cues.push({ start, end: start + Number(event.dDurationMs || 3000) / 1000, text: value });
+        }
+      }
+      if (!cues.length && typeof body === "string") {
+        const decodeXml = (value: string) => value
+          .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+          .replace(/&#x([\da-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+          .replace(/&#(\d+);/g, (_, decimal) => String.fromCodePoint(Number(decimal)))
+          .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+          .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+        for (const match of body.matchAll(/<text\b([^>]*)>([\s\S]*?)<\/text>/gi)) {
+          const start = Number(match[1].match(/\bstart="([^"]+)"/)?.[1]);
+          const duration = Number(match[1].match(/\bdur="([^"]+)"/)?.[1] || 3);
+          cues.push({ start, end: start + duration, text: decodeXml(match[2]) });
+        }
+      }
+      const cleaned = clean(cues);
+      if (!cleaned.length) throw Error("YouTube 播放器字幕为空或格式不受支持，无法生成包含两个来源的 Markdown。");
+      return {
+        key,
+        source: "YouTube · 播放器字幕",
+        tracks: [{ id: `player:${track.languageCode || "unknown"}`, label: text(track.name) || track.languageCode || "字幕" }],
+        selected: `player:${track.languageCode || "unknown"}`,
+        cues: cleaned,
+        details: `视频 ${id}；来源：YouTube 播放器 timed-text 字幕轨道。`,
+      };
+    }
     const panel =
       document.querySelector(
         'ytd-engagement-panel-section-list-renderer[target-id*="transcript"]',
@@ -248,6 +322,22 @@ export async function readVideoTranscript(
     const raw: SubtitleCue[] = [],
       tracks: Transcript["tracks"] = [];
     let selected = "native";
+    const closePluginOpenedPanel = (attempt = 0) => {
+      if (native?.openedByLocalMarkKey !== key) return;
+      const currentPanel = document.querySelector<HTMLElement>(
+        'ytd-engagement-panel-section-list-renderer[target-id*="transcript"],ytd-transcript-renderer',
+      );
+      const close = currentPanel?.querySelector<HTMLElement>(
+        'ytd-engagement-panel-title-header-renderer #close-button button,#close-button button,button[aria-label="关闭"],button[aria-label="Close"]',
+      );
+      if (close) {
+        close.click();
+        native.openedByLocalMarkKey = "";
+        native.openedKey = "";
+      } else if (attempt < 8) {
+        setTimeout(() => closePluginOpenedPanel(attempt + 1), 100);
+      }
+    };
     // Match native response to the current video before reading renderer data.
     if (response?.status === 200)
       walk(response.data, (o) => {
@@ -262,7 +352,7 @@ export async function readVideoTranscript(
           o.continuation?.reloadContinuationData?.continuation ||
           o.serviceEndpoint?.getTranscriptEndpoint?.params;
         if (o.title && endpoint) {
-          tracks.push({ id: endpoint, label: text(o.title) });
+          tracks.push({ id: endpoint, label: `${text(o.title)} · 内容转文字` });
           if (o.selected) selected = endpoint;
         }
       });
@@ -302,31 +392,8 @@ export async function readVideoTranscript(
       // response when present, but DOM alone is sufficient after a late opening.
       if (!cues.length) cues = rendered;
     }
-    if (trackId && trackId !== "native" && trackId !== selected) {
-      const choice = tracks.find((t) => t.id === trackId);
-      if (choice && panel) {
-        const footer = panel.querySelector(
-          "ytd-transcript-footer-renderer,yt-sort-filter-sub-menu-renderer",
-        );
-        const trigger = footer?.querySelector<HTMLElement>(
-          "button,.dropdown-trigger,tp-yt-paper-menu-button",
-        );
-        trigger?.click();
-        const option = Array.from(
-          document.querySelectorAll<HTMLElement>(
-            'tp-yt-paper-listbox tp-yt-paper-item,tp-yt-paper-listbox a,[role="listbox"] [role="option"]',
-          ),
-        ).find((e) => e.textContent?.trim() === choice.label);
-        if (option) {
-          option.click();
-          throw Error("正在等待当前视频的字幕语言切换。");
-        }
-      }
-      throw Error(
-        "请在 YouTube 原生内容转文字面板中切换语言，插件会自动同步。",
-      );
-    }
     if (cues.length) {
+      closePluginOpenedPanel();
       if (!tracks.length)
         tracks.push({
           id: "native",
@@ -335,7 +402,8 @@ export async function readVideoTranscript(
               ?.querySelector("ytd-transcript-footer-renderer")
               ?.textContent?.trim() || "与原生内容转文字一致",
         });
-      else if (selected === "native") selected = tracks[0].id;
+      else if (selected === "native")
+        selected = tracks[0].id;
       return {
         key,
         source: "YouTube · 原生内容转文字",
@@ -352,6 +420,7 @@ export async function readVideoTranscript(
     );
     if (button && native && native.openedKey !== key) {
       native.openedKey = key;
+      native.openedByLocalMarkKey = key;
       button.click();
       throw Error("正在等待当前视频的原生内容转文字。文稿出现后会自动同步。");
     }
@@ -368,9 +437,13 @@ export async function readVideoTranscript(
 }
 
 export async function transcriptRequest(
-  message: { key: string; trackId?: string; refresh?: boolean },
+  message: { key: string; refresh?: boolean; source?: "native" | "player" },
   sender: chrome.runtime.MessageSender,
 ) {
+  if (message.source && message.source !== "native" && message.source !== "player")
+    throw Error("字幕来源无效。");
+  if (message.source === "player" && !/^youtube:/.test(message.key))
+    throw Error("只能读取当前 YouTube 视频的播放器字幕。");
   if (/^gdcvault:/.test(message.key))
     return gdcTranscriptRequest(message, sender);
   // Chrome can retain the document's original URL in MessageSender after
@@ -383,8 +456,7 @@ export async function transcriptRequest(
     !origin ||
     !/^https?:$/.test(origin.protocol) ||
     !/^(www\.)?(youtube\.com|bilibili\.com)$/.test(origin.hostname) ||
-    typeof message.key !== "string" ||
-    (message.trackId !== undefined && typeof message.trackId !== "string")
+    typeof message.key !== "string"
   )
     throw Error("只能读取当前 Bilibili 或 YouTube 视频的字幕。");
   const results = await transcriptDeadline(
@@ -398,7 +470,7 @@ export async function transcriptRequest(
       world: "MAIN",
       injectImmediately: true,
       func: readVideoTranscript,
-      args: [message.key, message.trackId ?? "", message.refresh === true],
+      args: [message.key, message.refresh === true, message.source || "native"],
     }),
     15000,
     "读取网页字幕超时（15 秒）：网页脚本未返回结果，请重试。",

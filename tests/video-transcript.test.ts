@@ -64,6 +64,20 @@ describe("video transcript sources", () => {
       documentIds: ["doc"],
     });
   });
+  it("routes the internal YouTube player download without exposing a language selection", async () => {
+    const executeScript = vi.fn().mockResolvedValue([{ result: {
+      key: "youtube:first", source: "YouTube · 播放器字幕", tracks: [], selected: "player:en",
+      cues: [{ start: 1, end: 2, text: "player wording" }],
+    } }]);
+    vi.stubGlobal("chrome", { runtime: { id: "localmark" }, scripting: { executeScript } });
+    const sender = { id: "localmark", frameId: 0, documentId: "top", tab: { id: 7 },
+      url: "https://www.youtube.com/watch?v=first" } as chrome.runtime.MessageSender;
+    expect(await transcriptRequest({ key: "youtube:first", source: "player" }, sender))
+      .toHaveProperty("source", "YouTube · 播放器字幕");
+    expect(executeScript.mock.calls[0][0].args).toEqual(["youtube:first", false, "player"]);
+    await expect(transcriptRequest({ key: "bilibili:BVtest:1", source: "player" }, sender))
+      .rejects.toThrow("只能读取当前 YouTube");
+  });
   it("does not inject the reader for other origins or frames", async () => {
     const executeScript = vi.fn();
     vi.stubGlobal("chrome", {
@@ -185,6 +199,117 @@ describe("video transcript sources", () => {
     expect(click).toHaveBeenCalledTimes(1);
     expect(fetch).not.toHaveBeenCalled();
   });
+  it("closes the native transcript panel after the plugin opened it", async () => {
+    const w = page();
+    youtube(w);
+    w.__localmarkNativeSubtitles = { records: [], openedKey: "", openedByLocalMarkKey: "" };
+    const section = w.document.createElement("ytd-video-description-transcript-section-renderer");
+    const open = w.document.createElement("button");
+    open.textContent = "内容转文字";
+    section.append(open);
+    w.document.body.append(section);
+    const panel = w.document.createElement("ytd-engagement-panel-section-list-renderer");
+    panel.setAttribute("target-id", "engagement-panel-searchable-transcript");
+    const close = w.document.createElement("button");
+    close.setAttribute("aria-label", "关闭");
+    let closed = 0;
+    close.addEventListener("click", () => closed++);
+    panel.append(close);
+    w.document.body.append(panel);
+    await readVideoTranscript("youtube:first");
+    w.__localmarkNativeSubtitles.records = [{
+      type: "youtube", key: "youtube:first", status: 200,
+      data: { items: [segment("1000", "native response")] },
+    }];
+    await readVideoTranscript("youtube:first");
+    expect(closed).toBe(1);
+    expect(w.__localmarkNativeSubtitles.openedByLocalMarkKey).toBe("");
+  });
+  it("uses native YouTube transcript even when the player advertises a separate caption track", async () => {
+    const w = page();
+    youtube(w);
+    w.__localmarkNativeSubtitles = { records: [], openedKey: "" };
+    const player = w.document.querySelector("#movie_player") as any;
+    player.getPlayerResponse = () => ({
+      captions: {
+        playerCaptionsTracklistRenderer: {
+          captionTracks: [{
+            languageCode: "en",
+            name: { simpleText: "English" },
+            baseUrl: "https://www.youtube.com/api/timedtext?v=first&lang=en",
+          }],
+        },
+      },
+    });
+    w.__localmarkNativeSubtitles.records = [{ type: "youtube", key: "youtube:first", status: 200,
+      data: { items: [segment("1000", "native wording")] } }];
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const result = await readVideoTranscript("youtube:first");
+    expect(result).toMatchObject({
+      source: "YouTube · 原生内容转文字",
+      cues: [{ start: 1, text: "native wording" }],
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("reads the player's JSON3 captions separately for download without changing the native source", async () => {
+    const w = page();
+    youtube(w);
+    w.__localmarkNativeSubtitles = { records: [{ type: "youtube", key: "youtube:first", status: 200,
+      data: { items: [segment("1000", "native wording")] } }] };
+    const player = w.document.querySelector("#movie_player") as any;
+    player.getPlayerResponse = () => ({ captions: { playerCaptionsTracklistRenderer: { captionTracks: [{
+      languageCode: "en", name: { simpleText: "English" },
+      baseUrl: "https://www.youtube.com/api/timedtext?v=first&lang=en",
+    }] } } });
+    const fetch = vi.fn().mockResolvedValue({ ok: true, status: 200,
+      text: async () => JSON.stringify({ events: [{ tStartMs: 1000, dDurationMs: 2500,
+        segs: [{ utf8: "player wording" }] }] }) });
+    vi.stubGlobal("fetch", fetch);
+    expect(await readVideoTranscript("youtube:first", false, "player")).toMatchObject({
+      source: "YouTube · 播放器字幕",
+      cues: [{ start: 1, end: 3.5, text: "player wording" }],
+    });
+    expect(await readVideoTranscript("youtube:first")).toMatchObject({
+      source: "YouTube · 原生内容转文字",
+      cues: [{ text: "native wording" }],
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("uses captured player XML captions when direct timed-text fetch is unavailable", async () => {
+    const w = page();
+    youtube(w);
+    w.__localmarkNativeSubtitles = { records: [{
+      type: "youtube-player", key: "youtube:first", status: 200,
+      url: "https://www.youtube.com/api/timedtext?v=first&lang=en",
+      data: '<transcript><text start="2" dur="3">now &amp; permanent</text></transcript>',
+    }] };
+    const player = w.document.querySelector("#movie_player") as any;
+    player.getPlayerResponse = () => ({ captions: { playerCaptionsTracklistRenderer: { captionTracks: [{
+      languageCode: "en", name: { simpleText: "English" },
+      baseUrl: "https://www.youtube.com/api/timedtext?v=first&lang=en",
+    }] } } });
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    expect(await readVideoTranscript("youtube:first", false, "player")).toMatchObject({
+      cues: [{ start: 2, end: 5, text: "now & permanent" }],
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("does not expose player source choices when the native transcript is not ready", async () => {
+    const w = page();
+    youtube(w);
+    w.__localmarkNativeSubtitles = { records: [], openedKey: "" };
+    const player = w.document.querySelector("#movie_player") as any;
+    player.getPlayerResponse = () => ({
+      captions: { playerCaptionsTracklistRenderer: { captionTracks: [{
+        languageCode: "en",
+        name: { simpleText: "English" },
+        baseUrl: "https://www.youtube.com/api/timedtext?v=first&lang=en",
+      }] } },
+    });
+    expect(await readVideoTranscript("youtube:first")).toEqual({ error: expect.any(String) });
+  });
   it("rejects native records and DOM from the previous video", async () => {
     const w = page("https://www.youtube.com/watch?v=second");
     youtube(w);
@@ -282,8 +407,9 @@ describe("video transcript sources", () => {
     });
     expect(fetch).not.toHaveBeenCalled();
   });
-  it("only fetches a selected file URL from verified current-player metadata", async () => {
-    bili();
+  it("only fetches the default file URL from verified current-player metadata", async () => {
+    const w = bili();
+    w.__localmarkNativeSubtitles.records = w.__localmarkNativeSubtitles.records.filter((r: any) => r.type !== "bili-file");
     const fetch = vi
       .fn()
       .mockResolvedValue({
@@ -291,7 +417,7 @@ describe("video transcript sources", () => {
         json: async () => ({ body: [{ from: 1, to: 3, content: "Chinese" }] }),
       });
     vi.stubGlobal("fetch", fetch);
-    expect(await readVideoTranscript("bilibili:BVtest:2", "zh")).toMatchObject({
+    expect(await readVideoTranscript("bilibili:BVtest:2")).toMatchObject({
       selected: "zh",
       cues: [{ text: "Chinese" }],
     });

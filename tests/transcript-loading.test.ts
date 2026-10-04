@@ -150,38 +150,51 @@ describe("subtitle loading lifecycle", () => {
     );
     expect(chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
   });
-  it("retains a user's language selection made during a native background refresh", async () => {
-    let reply!: (value: any) => void;
-    await mount(sites[0], async (m) =>
-      m.type === "video-transcript-ping"
-        ? { ok: true, version: "test" }
-        : new Promise((r) => {
-            reply = r;
-          }),
-    );
-    const initial = response(sites[0].key);
-    initial.data.tracks.push({ id: "zh", label: "中文" });
-    await act(async () => {
-      reply(initial);
+  it("replaces the language selector with a Markdown download of the loaded transcript", async () => {
+    const createObjectURL = vi.fn(() => "blob:localmark-test");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", class extends URL {
+      static createObjectURL = createObjectURL;
+      static revokeObjectURL = revokeObjectURL;
     });
-    document.dispatchEvent(new Event("localmark-native-subtitles"));
-    await advance(201);
-    await act(async () => {
-      const select = shadow().querySelector("select")!;
-      select.value = "zh";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    await act(async () => {
-      reply(initial);
-    });
-    await advance(1);
-    expect(
-      vi.mocked(chrome.runtime.sendMessage).mock.calls.at(-1)![0],
-    ).toMatchObject({ type: "video-transcript", trackId: "zh" });
-    await act(async () => {
-      reply({ ...initial, data: { ...initial.data, selected: "zh" } });
-    });
-    expect(shadow().querySelector("select")!.value).toBe("zh");
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    await mount(sites[0], async (m) => m.type === "video-transcript-ping"
+      ? { ok: true, version: "test" }
+      : m.source === "player"
+        ? { ok: true, data: { ...response(sites[0].key).data,
+          source: "YouTube · 播放器字幕", selected: "player:en",
+          cues: [{ start: 1, end: 2, text: "Player sentence" }] } }
+        : response(sites[0].key));
+    expect(shadow().querySelector("#lm-transcript-language")).toBeNull();
+    const button = shadow().querySelector<HTMLButtonElement>('[aria-label="下载视频字幕 Markdown"]')!;
+    expect(button.disabled).toBe(false);
+    await act(async () => button.click());
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(click).toHaveBeenCalledOnce();
+    expect(click.mock.instances[0].download).toMatch(/字幕\.md$/);
+    expect(vi.mocked(chrome.runtime.sendMessage).mock.calls.some(([m]) =>
+      m.type === "video-transcript" && m.source === "player")).toBe(true);
+    expect(vi.mocked(chrome.runtime.sendMessage).mock.calls.filter(([m]) => m.type === "video-transcript")
+      .every(([m]) => !("trackId" in m))).toBe(true);
+  });
+  it("disables transcript download while subtitles are unavailable", async () => {
+    await mount(sites[0], async (m) => m.type === "video-transcript-ping"
+      ? { ok: true, version: "test" }
+      : { ok: false, error: "字幕不可用" });
+    expect(shadow().querySelector<HTMLButtonElement>('[aria-label="下载视频字幕 Markdown"]')?.disabled).toBe(true);
+    expect(shadow().querySelector("#lm-transcript-language")).toBeNull();
+  });
+  it("does not download an incomplete YouTube file if the player subtitles fail", async () => {
+    const createObjectURL = vi.fn(() => "blob:localmark-test");
+    vi.stubGlobal("URL", class extends URL { static createObjectURL = createObjectURL; });
+    await mount(sites[0], async (m) => m.type === "video-transcript-ping"
+      ? { ok: true, version: "test" }
+      : m.source === "player"
+        ? { ok: false, error: "播放器字幕不可用" }
+        : response(sites[0].key));
+    await act(async () => shadow().querySelector<HTMLButtonElement>('[aria-label="下载视频字幕 Markdown"]')!.click());
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(shadow().querySelector('[role="alert"]')?.textContent).toContain("播放器字幕不可用");
   });
   for (const site of sites) {
     it(`${site.key}: reports script injection timeout instead of leaving the worker request pending`, async () => {

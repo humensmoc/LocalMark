@@ -15,6 +15,7 @@ import { request } from "./protocol";
 import { colorInfo, highlightPalette, initialHighlightColor, type Color, type Library, type VideoCueRef, type VideoMark } from "./model";
 import { cueForTime, markCueRange, videoCueRef, videoMarkLabel, videoMarksForPage, videoPageUrl } from "./video-marks";
 import { ScreenshotImage } from "./ScreenshotImage";
+import { downloadTranscript } from "./transcript-download";
 import type { CaptureRect } from "./video-capture";
 import {
   DEFAULT_TRANSCRIPT_INTERVAL,
@@ -66,6 +67,7 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
     [quickNote, setQuickNote] = useState(""),
     [quickExpanded, setQuickExpanded] = useState(false),
     [markBusy, setMarkBusy] = useState(false),
+    [downloadBusy, setDownloadBusy] = useState(false),
     [markError, setMarkError] = useState(""),
     [paragraphSeconds, setParagraphSeconds] = useState(
       DEFAULT_TRANSCRIPT_INTERVAL,
@@ -75,7 +77,7 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
     alive = useRef(true),
     inFlight = useRef(false),
     nativePending = useRef(false),
-    userPending = useRef<{ trackId?: string; refresh: boolean } | null>(null),
+    userPending = useRef<{ refresh: boolean } | null>(null),
     queuedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     nativeLanguage = useRef<string | undefined>(undefined),
     searchInput = useRef<HTMLInputElement>(null),
@@ -91,8 +93,7 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
     suppressLocateClick = useRef(false),
     draftInput = useRef<HTMLTextAreaElement>(null),
     composerRef = useRef<HTMLDivElement>(null),
-    deepLinkDone = useRef(false),
-    pendingRailJump = useRef<string | null>(null);
+    deepLinkDone = useRef(false);
   const pageUrl = videoPageUrl(target);
   const page = library ? Object.values(library.entries).find(entry => entry.page.url === pageUrl)?.page : undefined;
   const marks = videoMarksForPage(page, target.key);
@@ -226,13 +227,13 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
       document.removeEventListener("scroll", positionSource, true);
     };
   }, [sourceOpen, data, error]);
-  async function load(trackId?: string, refresh = false, fromNative = false) {
+  async function load(refresh = false, fromNative = false) {
     // Native observers can notify while a slow read is still running. Queue one
     // follow-up without invalidating the current result or hiding loaded rows.
     if (inFlight.current) {
       if (fromNative) nativePending.current = true;
       else {
-        userPending.current = { trackId, refresh };
+        userPending.current = { refresh };
         setBusy(true);
         setLoadingStage("正在等待当前读取结束，随后加载所选字幕…");
       }
@@ -272,7 +273,6 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
           {
             type: "video-transcript",
             key: target.key,
-            trackId,
             refresh: refresh && attempt === 0,
           },
           target.site === "gdcvault" ? 90000 : 20000,
@@ -299,7 +299,7 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
       )
         return;
       setData(response.data);
-      setError("");
+      setError(response.data.error || "");
       setCurrent(-1);
     } catch (e) {
       if (alive.current && g === generation.current)
@@ -316,13 +316,37 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
         if (userRequest)
           queuedTimer.current = setTimeout(() => {
             if (alive.current)
-              void load(userRequest.trackId, userRequest.refresh);
+              void load(userRequest.refresh);
           }, 0);
         else if (followUp && replied)
           queuedTimer.current = setTimeout(() => {
-            if (alive.current) void load(undefined, false, true);
+            if (alive.current) void load(false, true);
           }, 200);
       }
+    }
+  }
+  async function downloadCaptions() {
+    if (!data?.cues.length || downloadBusy || videoTarget(location.href)?.key !== target.key) return;
+    setDownloadBusy(true);
+    setMarkError("");
+    try {
+      let player: Transcript | undefined;
+      if (target.site === "youtube") {
+        const response = await transcriptMessage(
+          { type: "video-transcript", key: target.key, source: "player" },
+          20000,
+          "读取 YouTube 播放器字幕超时，请稍后重试。",
+        );
+        if (!response?.ok) throw Error(response?.error || "播放器字幕读取失败。");
+        player = response.data;
+        if (player?.key !== target.key || videoTarget(location.href)?.key !== target.key)
+          throw Error("视频已切换，请在当前视频重新下载字幕。");
+      }
+      downloadTranscript(data, target, document.title, pageUrl, player);
+    } catch (cause) {
+      setMarkError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setDownloadBusy(false);
     }
   }
   useEffect(() => {
@@ -332,7 +356,7 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
     const nativeChanged = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (alive.current) void load(undefined, false, true);
+        if (alive.current) void load(false, true);
       }, 200);
     };
     document.addEventListener("localmark-native-subtitles", nativeChanged);
@@ -371,7 +395,7 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
           const previous = nativeLanguage.current;
           nativeLanguage.current = language;
           if (previous !== undefined && language && previous !== language)
-            void load(undefined, false, true);
+            void load(false, true);
         } catch {
           if (!disposed) setPlayerReady(false);
           /* A reloaded extension or replaced frame will be checked on retry. */
@@ -475,26 +499,11 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
       requestAnimationFrame(() => requestAnimationFrame(() => scrollCue(index)));
     } else scrollCue(index);
   }
-  useEffect(() => {
-    const id = pendingRailJump.current;
-    if (!id || !data) return;
-    const mark = marks.find(item => item.id === id);
-    if (!mark) return;
-    if (mark.kind === "subtitle" && mark.trackId !== data.selected) return;
-    const range = markCueRange(mark, data.cues, data.selected);
-    pendingRailJump.current = null;
-    if (!range) { setMarkError("原字幕已变化，无法定位这条文字标注。"); return; }
-    requestAnimationFrame(() => scrollCue(range[0]));
-  }, [data, marks]);
   async function jumpRail(mark: VideoMark) {
     if (!data) return;
-    pendingRailJump.current = mark.id;
-    if (mark.kind === "subtitle" && mark.trackId && mark.trackId !== data.selected) await load(mark.trackId);
-    else {
-      const range = markCueRange(mark, data.cues, data.selected);
-      if (range) { pendingRailJump.current = null; scrollCue(range[0]); }
-      else setMarkError("原字幕已变化，无法定位这条文字标注。");
-    }
+    const range = markCueRange(mark, data.cues, data.selected);
+    if (range) scrollCue(range[0]);
+    else setMarkError("原字幕已变化或来自其他字幕来源，无法定位这条文字标注。");
   }
   useEffect(() => {
     const listener = (message: { type?: string; action?: string; id?: string; key?: string }, sender: chrome.runtime.MessageSender, reply: (value: unknown) => void) => {
@@ -650,7 +659,7 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
         <button
           className="retry"
           disabled={busy}
-          onClick={() => void load(undefined, true)}
+          onClick={() => void load(true)}
           title="重新加载字幕"
         >
           重试
@@ -673,7 +682,7 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
               <>
                 <div className={`message${error ? " error" : ""}`} role={error ? "alert" : "status"}>
                   <strong>{busy ? loadingStage : error ? "字幕暂不可用" : "当前没有可显示的字幕"}</strong>
-                  {error && <><p>{error}</p><button type="button" onClick={() => void load(undefined, true)}>重新加载字幕</button></>}
+                  {error && <><p>{error}</p><button type="button" onClick={() => void load(true)}>重新加载字幕</button></>}
                   <p>仍可按当前播放时间截图、添加关键帧和评论。</p>
                 </div>
                 <div className="video-point-list" aria-label="视频时间点标注">
@@ -802,25 +811,13 @@ function Panel({ target, theme, onToggleTheme }: { target: VideoTarget; theme: V
           <Icon name="help" size={16} />
         </button>
           <div className={`tools${searchOpen ? " search-open" : ""}`}>
-            <label className="sr-only" htmlFor="lm-transcript-language">
-              字幕语言
-            </label>
-            {data && (
-              <select
-                id="lm-transcript-language"
-                aria-label="字幕语言"
-                title={data.tracks.find((t) => t.id === data.selected)?.label}
-                value={data.selected}
-                disabled={busy}
-                onChange={(e) => void load(e.target.value)}
-              >
-                {data.tracks.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            )}
+            <button type="button" className="transcript-download" aria-label="下载视频字幕 Markdown"
+              title={hasTranscript ? target.site === "youtube" ? "下载内容转文字与播放器字幕 Markdown" : "下载当前视频的完整字幕 Markdown" : "字幕加载成功后可下载"}
+              disabled={!hasTranscript || downloadBusy}
+              onClick={() => void downloadCaptions()}>
+              <Icon name="download" size={16} />
+              <span>{downloadBusy ? "下载中…" : "下载字幕"}</span>
+            </button>
             <div className="search-control">
               {searchOpen && (
                 <input

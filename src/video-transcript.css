@@ -103,7 +103,6 @@ header {
   gap: 4px;
   color: var(--fg);
 }
-.tools select,
 .tools input {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -113,17 +112,10 @@ header {
   height: 28px;
   font-size: 12px;
 }
-.tools select {
-  flex: 0 1 112px;
-  width: 112px;
-  max-width: 50%;
-  text-overflow: ellipsis;
-}
-.tools.search-open select {
-  flex-basis: 72px;
-  width: 72px;
-  max-width: 38%;
-}
+.transcript-download { display: inline-flex; align-items: center; justify-content: center; gap: 4px; flex: none; height: 28px; padding: 0 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--input); color: var(--fg); font-size: 12px; white-space: nowrap; }
+.transcript-download:hover:not(:disabled) { background: var(--hover); }
+.tools.search-open .transcript-download { width: 28px; padding: 0; }
+.tools.search-open .transcript-download span { display: none; }
 .search-control {
   display: flex;
   align-items: center;

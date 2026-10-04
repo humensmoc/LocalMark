@@ -1,5 +1,5 @@
 import { colorInfo } from "./model";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   highlightPalette,
@@ -87,6 +87,7 @@ function App() {
   const refreshGeneration = useRef(0),
     elementButtonRef = useRef<HTMLButtonElement>(null),
     hoverPoint = useRef({ x: 0, y: 0 }),
+    selectedRange = useRef<Range | null>(null),
     noteRef = useRef<HTMLTextAreaElement>(null),
     toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -104,6 +105,15 @@ function App() {
     toastTimer.current = setTimeout(() => setToast(""), 4500);
   };
   const sidebar = useSidePanelToggle(tell);
+  useLayoutEffect(() => {
+    const api = (CSS as unknown as { highlights?: { set(name: string, value: unknown): void; delete(name: string): void } }).highlights;
+    const H = (window as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight;
+    const range = draft?.preserveSelection && !draft.note ? selectedRange.current : null;
+    if (api && H && range?.commonAncestorContainer.isConnected)
+      api.set("wc-draft-selection", new H(range));
+    else api?.delete("wc-draft-selection");
+    return () => api?.delete("wc-draft-selection");
+  }, [draft?.anchor, draft?.preserveSelection, !!draft?.note]);
   const showElementButton = pageToolEnabled(lib, "element");
   const showVisibilityButton = pageToolEnabled(lib, "visibility");
   async function load(refresh = false) {
@@ -295,6 +305,7 @@ function App() {
       if (r.commonAncestorContainer.parentElement?.closest("#" + HOST)) return;
       const captured = captureSelection(r);
       if (!captured) return;
+      selectedRange.current = r;
       selectionClickPending = true;
       const a = captured.anchor;
       if (captured.warning) tell(captured.warning);
@@ -396,12 +407,6 @@ function App() {
         setOverlaps(null);
         setRebind(null);
         setPicking(false);
-      } else if (snapshot.current.draft?.preserveSelection &&
-        !e.ctrlKey && !e.metaKey && !e.altKey &&
-        (e.key.length === 1 || e.key === "Process") &&
-        !e.composedPath().includes(instance.host as EventTarget)) {
-        // Keep the selected page text available to Copy until the user starts a note.
-        noteRef.current?.focus({ preventScroll: true });
       }
     };
     const leavePage = () => { lastPointer = null; keepHover(); setHover(null); };
@@ -622,7 +627,7 @@ function App() {
       )}
       <FloatingPresence>{draft && (
         <Floating className="editor" x={draft.x} y={draft.y}
-          focusRef={draft.preserveSelection ? undefined : noteRef} draggable positionKey={draft.anchor}>
+          focusRef={noteRef} draggable positionKey={draft.anchor}>
           <div className={"annotation-composer" + (draft.expanded ? " composer-expanded" : "")}
             role="dialog" aria-label={draft.id ? "编辑标注" : "新建标注"}
             onKeyDown={event => event.stopPropagation()}>
@@ -652,7 +657,13 @@ function App() {
             <textarea ref={noteRef} id="wc-note" aria-label="批注" rows={1} maxLength={100000}
               placeholder="写下你的想法…" value={draft.note} disabled={busy}
               onClick={() => setDraft({ ...draft, expanded: true })}
-              onChange={event => setDraft({ ...draft, note: event.target.value, expanded: true })}
+              onChange={event => setDraft({ ...draft, note: event.target.value, expanded: true, preserveSelection: false })}
+              onCopy={event => {
+                const input = event.currentTarget;
+                if (!draft.preserveSelection || draft.note || input.selectionStart !== input.selectionEnd) return;
+                event.preventDefault();
+                event.clipboardData.setData("text/plain", draft.text ?? draft.anchor.exact);
+              }}
               onKeyDown={event => {
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
                   event.preventDefault(); void save();

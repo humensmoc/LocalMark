@@ -10,6 +10,7 @@ export function observeNativeSubtitles() {
     revision: 0,
     domKey: "",
     openedKey: "",
+    openedByLocalMarkKey: "",
   });
   const notify = () => {
     state.revision++;
@@ -34,6 +35,11 @@ export function observeNativeSubtitles() {
         u.pathname === "/youtubei/v1/get_transcript"
       )
         return "youtube";
+      if (
+        /^(www\.)?youtube\.com$/.test(u.hostname) &&
+        u.pathname === "/api/timedtext"
+      )
+        return "youtube-player";
     } catch {
       /* Ignore unrelated/invalid URLs. */
     }
@@ -90,7 +96,7 @@ export function observeNativeSubtitles() {
     });
     state.records.sort((a: any, b: any) => a.order - b.order);
     state.records = state.records.slice(-24);
-    if (!unchanged || selectionChanged) notify();
+    if (type !== "youtube-player" && (!unchanged || selectionChanged)) notify();
   }
   let order = 0;
   const originalFetch = window.fetch;
@@ -108,18 +114,19 @@ export function observeNativeSubtitles() {
             Number(response.headers.get("content-length")) > 8_000_000
           )
             return;
-          return response
-            .clone()
-            .json()
-            .then((data) =>
-              accept(
-                new URL(address, location.href).href,
-                key,
-                data,
-                response.status,
-                requestOrder,
-              ),
+          return response.clone().text().then((body) => {
+            let data: any = body;
+            try {
+              data = JSON.parse(body);
+            } catch { /* YouTube player subtitles may be XML timed-text. */ }
+            accept(
+              new URL(address, location.href).href,
+              key,
+              data,
+              response.status,
+              requestOrder,
             );
+          });
         })
         .catch(() => {});
     return result;
@@ -155,7 +162,13 @@ export function observeNativeSubtitles() {
               current.key,
               this.responseType === "json"
                 ? this.response
-                : JSON.parse(this.responseText),
+                : (() => {
+                    try {
+                      return JSON.parse(this.responseText);
+                    } catch {
+                      return this.responseText;
+                    }
+                  })(),
               this.status,
               current.order,
             );
