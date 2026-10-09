@@ -4,13 +4,20 @@
 
 ## 阅读说明
 
-- 当前核对版本：**0.3.43**。package、lock 顶层/根包及 public/dist manifest 一致，内容脚本与侧栏内嵌构建版本同步。重新加载扩展并刷新网页后应核对 v0.3.43；本地验证不代表用户当前页面已更新。
+- 当前核对版本：**0.3.44**。package、lock 顶层/根包及 public/dist manifest 一致，内容脚本与侧栏内嵌构建版本同步。重新加载扩展并刷新网页后应核对 v0.3.44；本地验证不代表用户当前页面已更新。
 - 早期使用 `1.0.0`—`1.0.10`，2026-09-17 明确尚未正式发布，纠正为 `0.1.10`，之后使用 `0.x.y`。以下保留真实旧编号，按演进时间倒序，而非按主版本数值排序。
 - 历史依据为 Codex 对话、当前仓库 Git 历史及 [TESTING.md](TESTING.md)。下文“历史验证”仅转述当时记录，本次建档没有重新运行产品测试。对话来源编号见文末。
 - `0.2.9`、`0.2.18` 是可确认的中间构建；`0.2.19` 已交付卡片调整，但翻译功能最终以 `0.2.21` 整合交付。不能把版本递增次数等同于独立发布次数。
 - 每版写明实际改动、验证和限制。无插件功能改动的讨论、文档调整与排查，在当前版本的“会话补充”中按回合追加；待办不计作已实现功能。
 
 ## 0.3 系列：字幕段落阅读与标注交互
+
+### 0.3.44 · 2026-10-09 · 适配 YouTube 新版“转写文稿”面板
+
+- 问题：用户在 v0.3.43 的 YouTube 页面已打开新版“转写文稿”（带章节分组），侧栏仍显示“字幕暂不可用”。在内置浏览器对同一视频（KNs9shgQ2rI）实测确认三处原因：①网站改用 `/youtubei/v1/get_panel` 加载 `PAmodern_transcript_view` 面板，不再请求 `get_transcript`，原生响应未被捕获；②新响应的 `transcriptSegmentViewModel` 只有 `timestamp`（如 `0:12`）和 `simpleText`，没有 `startMs/endMs/snippet`；③DOM 中 `transcript-segment-view-model` 的正文改为 `span.ytAttributedStringHost`，不再是 `.ytwTranscriptSegmentViewModelText`，文字读成空串后被全部过滤。
+- 修复：`video-native` 同时捕获 `get_panel`，但只保留含 `transcriptSegmentViewModel` 的响应，避免其他面板覆盖文稿记录；读取器解析 `timestamp`/`simpleText`，DOM 增加 `.ytAttributedStringHost` 正文选择器；缺少结束时间时用下一条 cue 的开始时间补齐（末条仍为 +3 秒）；存在多个隐藏的 transcript 面板时优先读取展开中的面板，插件自动打开后的关闭也作用于同一面板；提示文字补充新版名称“转写文稿”。
+- 从 0.3.43 递增至 0.3.44，同步 package、lock 顶层/根包、public/dist manifest 并重建 dist；保留工作区其他未提交改动（`doc/后端与存储接口草案.md` 等），未提交 Git。
+- 验证：新增 get_panel 时间戳响应与新版展开面板 DOM 两项单元测试；Vitest 25 个测试文件、263 项测试通过，`npm run build`、`git diff --check` 通过。真实页面结构来自内置浏览器实测（未加载扩展）；扩展在用户页面上的实际读取效果仍需重新加载扩展、刷新网页后确认侧栏显示 v0.3.44 再核对。新版面板的时间精度只有秒级。
 
 ### 0.3.43 · 2026-10-03 · 修复拼音首字母脱离组合输入
 
@@ -24,6 +31,8 @@
 #### 会话补充
 
 - 2026-10-03 · `bookmark-read-later-product-boundary`：针对“只收藏”与“以后有空看”的轻量需求讨论与现有标注资料库的边界。建议保持单一网页记录，把“收藏”作为长期保留意图、“稍后看”作为可完成的阅读队列，高亮、批注、评论、分类与评分继续属于深度整理层；三者用独立入口和视图呈现，底层不重复建档。稍后看完成后可选保留为收藏或移出，产生标注时自然进入资料库。本轮仅产品方案与只读核对，无插件功能改动，不升版、不构建、不运行产品测试。
+- 2026-10-08 · `server-backend-storage-adapter-review`：用户希望后端上服务器、账号登录，并通过清晰接口切换本地存储、服务器存储及不同服务器。只读核对实验项目：`D:/AI/meowa-outline`（2026-09-27 四个提交）在 Outline 内新增 `webAnnotations.list/read/write/connect`，服务端直接把管理员配置目录中的 LocalMark JSON 文件当存储，单一全局库、整文件 SHA-256 修订号乐观并发、目录锁、每次 list 全量读文件；配套插件仅存在于 `D:/AI/localmark-extension/dist`（0.2.54 构建产物），其 `RemoteFiles` 复用 `Files` 接口但服务器地址硬编码为 `wiki.meowa.ai`，本仓库 Git 历史中没有对应源码，主线由 0.2.53 直接进入 0.3.0。结合当前主线：`SyncEngine` 已依赖 `Files` 接口，但 IndexedDB 整库单值存储、多处模块直接访问目录句柄、硬删除无墓碑、无逐记录版本号与变更游标，不适合直接接入多设备服务端同步。建议方案：以逐记录 Repository/SyncAdapter 接口（pull 变更游标、push 幂等操作、墓碑、版本号）取代文件路径接口，本地 IndexedDB 作为离线缓存与待上传队列，后端独立服务（账号、令牌、workspace 权限、数据库与对象存储），服务器地址与存储模式可在设置中配置；Outline 集成降为可选消费方。仅讨论与只读排查，尚未实施；五处版本未改动（当前 0.3.43），无插件功能改动，不升版、不构建、不运行测试。
+- 2026-10-09 · `backend-storage-interface-draft`：按上一轮建议新增 [doc/后端与存储接口草案.md](doc/后端与存储接口草案.md)。内容包括：分层（LibraryRepository / LocalCache / SyncCoordinator / SyncAdapter）；把 Page 拆成 page/mark/videoMark/taxon/workspaceSettings 记录，带 version 与墓碑，媒体按内容哈希引用；StorageProfile 多服务器配置与按配置隔离的缓存库；幂等 LocalOp 与 outbox，以及现有 Request 消息到 op 的映射；字段级三方合并规则；AuthSession（OAuth PKCE、刷新令牌轮换）；HTTP API v1（meta、auth、workspaces、changes 游标、ops 批量推送、URL lookup、media）；服务端表结构参考、迁移路径、五阶段实施顺序与待确认问题。状态为草案，尚未实施；仅文档改动，五处版本保持 0.3.43，无插件功能改动，不升版、不构建、不运行测试。
 
 ### 0.3.42 · 2026-10-01 · 一次下载 YouTube 两种字幕来源
 

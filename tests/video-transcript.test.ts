@@ -182,6 +182,38 @@ describe("video transcript sources", () => {
       cues: [{ start: 42, text: "new DOM" }],
     });
   });
+  it("reads the modern get_panel transcript with timestamp-only segments", async () => {
+    const w = page();
+    youtube(w);
+    const item = (timestamp: string, simpleText: string) => ({
+      macroMarkersPanelItemViewModel: { item: { timelineItemViewModel: {
+        timestamp, contentItems: [{ transcriptSegmentViewModel: { simpleText, timestamp } }],
+      } } },
+    });
+    w.__localmarkNativeSubtitles = { records: [{ type: "youtube", key: "youtube:first", status: 200,
+      data: { content: { engagementPanelSectionListRenderer: { content: { sectionListRenderer: {
+        contents: [{ itemSectionRenderer: { contents: [item("0:12", "hi"), item("1:02", "later")] } }],
+      } } } } } }] };
+    expect(await readVideoTranscript("youtube:first")).toMatchObject({
+      source: "YouTube · 原生内容转文字",
+      cues: [{ start: 12, end: 62, text: "hi" }, { start: 62, end: 65, text: "later" }],
+    });
+  });
+  it("reads the expanded modern transcript panel DOM instead of a hidden legacy panel", async () => {
+    const w = page();
+    youtube(w);
+    w.__localmarkNativeSubtitles = { domKey: "youtube:first", records: [] };
+    w.document.body.insertAdjacentHTML(
+      "beforeend",
+      '<ytd-engagement-panel-section-list-renderer target-id="engagement-panel-searchable-transcript" visibility="ENGAGEMENT_PANEL_VISIBILITY_HIDDEN"></ytd-engagement-panel-section-list-renderer>' +
+        '<ytd-engagement-panel-section-list-renderer target-id="PAmodern_transcript_view" visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED">' +
+        '<transcript-segment-view-model><div class="ytwTranscriptSegmentViewModelTimestamp">0:12</div><div class="ytwTranscriptSegmentViewModelTimestampA11yLabel">12秒钟</div><span class="ytAttributedStringHost">modern DOM</span></transcript-segment-view-model>' +
+        "</ytd-engagement-panel-section-list-renderer>",
+    );
+    expect(await readVideoTranscript("youtube:first")).toMatchObject({
+      cues: [{ start: 12, text: "modern DOM" }],
+    });
+  });
   it("opens the website transcript button once instead of reconstructing API calls", async () => {
     const w = page();
     youtube(w);

@@ -32,7 +32,8 @@ export function observeNativeSubtitles() {
         return "bili-file";
       if (
         /^(www\.)?youtube\.com$/.test(u.hostname) &&
-        u.pathname === "/youtubei/v1/get_transcript"
+        (u.pathname === "/youtubei/v1/get_transcript" ||
+          u.pathname === "/youtubei/v1/get_panel")
       )
         return "youtube";
       if (
@@ -54,6 +55,13 @@ export function observeNativeSubtitles() {
   ) {
     const type = kind(address);
     if (!type || !key || videoTarget(location.href)?.key !== key) return;
+    // get_panel also serves non-transcript panels; keep only the modern
+    // "转写文稿" panel so it never replaces an earlier transcript record.
+    if (
+      address.includes("/youtubei/v1/get_panel") &&
+      !(typeof data === "object" && JSON.stringify(data).includes("transcriptSegmentViewModel"))
+    )
+      return;
     // Only subtitle metadata/text is retained, not unrelated player/user data.
     const value =
       type === "bili-player"

@@ -314,19 +314,41 @@ export async function readVideoTranscript(
         details: `视频 ${id}；来源：YouTube 播放器 timed-text 字幕轨道。`,
       };
     }
-    const panel =
-      document.querySelector(
+    // YouTube keeps several hidden transcript panels (legacy searchable and
+    // modern "转写文稿"); prefer the expanded one, then any with segments.
+    const findPanel = () => {
+      const panels = Array.from(document.querySelectorAll<HTMLElement>(
         'ytd-engagement-panel-section-list-renderer[target-id*="transcript"]',
-      ) || document.querySelector("ytd-transcript-renderer");
+      ));
+      return (
+        panels.find((p) => p.getAttribute("visibility") === "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED") ||
+        panels.find((p) => p.querySelector("ytd-transcript-segment-renderer,transcript-segment-view-model")) ||
+        panels[0] ||
+        document.querySelector<HTMLElement>("ytd-transcript-renderer")
+      );
+    };
+    const panel = findPanel();
+    const clock = (value: unknown) =>
+      typeof value === "string" && /^\d+(?::\d{2}){1,2}$/.test(value.trim())
+        ? value.trim().split(":").reduce((v, p) => v * 60 + Number(p), 0)
+        : NaN;
+    // The modern panel only carries second-precision start times; derive each
+    // missing end from the next cue instead of a fixed duration.
+    const fillEnds = (cues: SubtitleCue[]) => {
+      const sorted = cues.filter((c) => Number.isFinite(c.start)).sort((a, b) => a.start - b.start);
+      sorted.forEach((c, i) => {
+        const next = sorted[i + 1]?.start;
+        if (!(Number.isFinite(c.end) && c.end > c.start) && next !== undefined && next > c.start) c.end = next;
+      });
+      return cues;
+    };
     const response = records.filter((r) => r.type === "youtube").at(-1);
     const raw: SubtitleCue[] = [],
       tracks: Transcript["tracks"] = [];
     let selected = "native";
     const closePluginOpenedPanel = (attempt = 0) => {
       if (native?.openedByLocalMarkKey !== key) return;
-      const currentPanel = document.querySelector<HTMLElement>(
-        'ytd-engagement-panel-section-list-renderer[target-id*="transcript"],ytd-transcript-renderer',
-      );
+      const currentPanel = findPanel();
       const close = currentPanel?.querySelector<HTMLElement>(
         'ytd-engagement-panel-title-header-renderer #close-button button,#close-button button,button[aria-label="关闭"],button[aria-label="Close"]',
       );
@@ -344,9 +366,9 @@ export async function readVideoTranscript(
         const s = o.transcriptSegmentRenderer || o.transcriptSegmentViewModel;
         if (s)
           raw.push({
-            start: Number(s.startMs) / 1000,
+            start: s.startMs !== undefined ? Number(s.startMs) / 1000 : clock(s.timestamp),
             end: Number(s.endMs) / 1000,
-            text: text(s.snippet || s.text),
+            text: text(s.snippet || s.text || s.simpleText),
           });
         const endpoint =
           o.continuation?.reloadContinuationData?.continuation ||
@@ -356,7 +378,7 @@ export async function readVideoTranscript(
           if (o.selected) selected = endpoint;
         }
       });
-    let cues = clean(raw);
+    let cues = clean(fillEnds(raw));
     const nativeCurrent =
       native?.domKey === key ||
       (!native &&
@@ -375,19 +397,14 @@ export async function readVideoTranscript(
             ?.textContent?.trim() || "";
         const s = (el as unknown as Obj).data;
         dom.push({
-          start:
-            s?.startMs !== undefined
-              ? Number(s.startMs) / 1000
-              : /^\d+(?::\d{2}){1,2}$/.test(stamp)
-                ? stamp.split(":").reduce((v, p) => v * 60 + Number(p), 0)
-                : NaN,
+          start: s?.startMs !== undefined ? Number(s.startMs) / 1000 : clock(stamp),
           end: Number(s?.endMs) / 1000,
           text:
-            el.querySelector(".segment-text,.ytwTranscriptSegmentViewModelText")
+            el.querySelector(".segment-text,.ytwTranscriptSegmentViewModelText,.ytAttributedStringHost")
               ?.textContent || text(s?.snippet),
         });
       }
-      const rendered = clean(dom);
+      const rendered = clean(fillEnds(dom));
       // A search/virtualized native list can be partial; prefer the full native
       // response when present, but DOM alone is sufficient after a late opening.
       if (!cues.length) cues = rendered;
@@ -429,7 +446,7 @@ export async function readVideoTranscript(
         `YouTube 原生内容转文字返回 HTTP ${response.status}：${response.data?.error?.message || "加载失败"}。在网站打开文稿后，插件会自动同步。`,
       );
     throw Error(
-      "请打开 YouTube 的“内容转文字”。文稿出现后插件会自动同步，无需重新请求字幕服务。",
+      "请打开 YouTube 的“内容转文字”（新版界面称“转写文稿”）。文稿出现后插件会自动同步，无需重新请求字幕服务。",
     );
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };

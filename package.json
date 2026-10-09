@@ -1,6 +1,6 @@
 {
   "name": "local-web-clipper",
-  "version": "0.3.43",
+  "version": "0.3.44",
   "private": true,
   "type": "module",
   "scripts": {
