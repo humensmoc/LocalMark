@@ -1,0 +1,7 @@
+{
+  "prefer_device_route": true,
+  "log_root_by_host": {
+    "ahsdemacbook-air": "/Users/ahs/Documents/快捷指令/对话日志",
+    "desktop-fhjmjj4": "D:/Software/ObsidianSyncVault/快捷指令/对话日志"
+  }
+}
