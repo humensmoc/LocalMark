@@ -11,6 +11,7 @@ function Settings() {
   const [lib, setLib] = useState<Library>(emptyLibrary()),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
+    [dashboardOpenMode, setDashboardOpenMode] = useState<"window" | "tab">("window"),
     [directoryReady, setDirectoryReady] = useState(false),
     [preview, setPreview] = useState<Entry | null>(null);
   const directory = useRef<FileSystemDirectoryHandle | undefined>(undefined);
@@ -26,6 +27,9 @@ function Settings() {
     }
   }
   useEffect(() => {
+    void chrome.storage.local.get("dashboardOpenMode")
+      .then(({ dashboardOpenMode: mode }) => setDashboardOpenMode(mode === "tab" ? "tab" : "window"))
+      .catch((e) => setError(String(e)));
     // Load the handle before the user clicks so permission is requested during that gesture.
     void db
       .get<FileSystemDirectoryHandle>("root")
@@ -105,7 +109,24 @@ function Settings() {
       </header>
       <section>
         <h2>集中整理文章</h2>
-        <p>在大窗口中筛选文章，编辑分类、标签、网页评论和高亮批注。</p>
+        <p>筛选文章，编辑分类、标签、网页评论和高亮批注。</p>
+        <div className="markdown-setting">
+          <div>
+            <label htmlFor="dashboard-open-mode">文章管理打开方式</label>
+            <p id="dashboard-open-mode-help">选择后，下次打开文章管理时生效。</p>
+          </div>
+          <select id="dashboard-open-mode" aria-describedby="dashboard-open-mode-help"
+            value={dashboardOpenMode} disabled={busy}
+            onChange={(event) => {
+              const mode = event.target.value === "tab" ? "tab" : "window";
+              void chrome.storage.local.set({ dashboardOpenMode: mode })
+                .then(() => { setDashboardOpenMode(mode); setError(""); })
+                .catch((e) => setError(String(e)));
+            }}>
+            <option value="window">独立窗口</option>
+            <option value="tab">浏览器标签页</option>
+          </select>
+        </div>
         <button className="primary" onClick={() => void run(() => request({ type: "dashboard" }))}>打开文章管理</button>
       </section>
       <section>

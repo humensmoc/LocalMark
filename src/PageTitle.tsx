@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { SiteIcon } from "./SiteIcon";
 
 export type TitleDraft = { value: string; base: string | null };
@@ -13,16 +13,18 @@ export function PageTitle({ title, savedTitle, draft, change, cancel, save, site
   save: (draft: TitleDraft) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const saving = useRef(false);
   const [error, setError] = useState("");
   const stale = !!draft && draft.base !== savedTitle;
   async function submit() {
-    if (!draft || busy || stale) return;
+    if (!draft || saving.current || stale) return;
     if (!draft.value.trim()) { setError("标题不能为空。"); return; }
+    saving.current = true;
     setBusy(true);
     setError("");
     try { await save(draft); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setBusy(false); }
+    finally { saving.current = false; setBusy(false); }
   }
   if (!draft) return (
     <div className="page-title-row">
@@ -33,7 +35,10 @@ export function PageTitle({ title, savedTitle, draft, change, cancel, save, site
     </div>
   );
   return (
-    <section className="page-title-editor" aria-label="标题编辑区域">
+    <section className="page-title-editor" aria-label="标题编辑区域"
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) void submit();
+      }}>
       <label htmlFor="wc-page-title">网页标题</label>
       <textarea id="wc-page-title" autoFocus rows={3} maxLength={1000}
         value={draft.value} disabled={busy}
@@ -44,7 +49,7 @@ export function PageTitle({ title, savedTitle, draft, change, cancel, save, site
           if (e.key === "Escape" && !busy) { e.preventDefault(); cancel(); }
         }} />
       <div className="row spread wrap">
-        <small>Ctrl+Enter 保存</small>
+        <small>点击别处自动保存，或按 Ctrl+Enter</small>
         <div className="row">
           <button disabled={busy} onClick={cancel}>取消</button>
           <button className="primary" disabled={busy || stale || !draft.value.trim()}

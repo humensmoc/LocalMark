@@ -82,6 +82,25 @@ try {
     1,
   );
   ok("reopening focuses the existing popup");
+  await settings.getByRole("combobox", { name: "文章管理打开方式" }).selectOption("tab");
+  await settings.waitForFunction(async () => (await chrome.storage.local.get("dashboardOpenMode")).dashboardOpenMode === "tab");
+  const tabEvent = context.waitForEvent("page", (p) => p.url() === `${origin}/dashboard.html`);
+  await settings.getByRole("button", { name: "打开文章管理", exact: true }).click();
+  const dashboardTab = await tabEvent;
+  await dashboardTab.waitForLoadState();
+  assert.equal((await dashboardTab.evaluate(() => chrome.windows.getCurrent())).type, "normal");
+  await settings.getByRole("button", { name: "打开文章管理", exact: true }).click();
+  assert.equal(context.pages().filter((p) => p.url() === `${origin}/dashboard.html`).length, 2);
+  await settings.reload();
+  await settings.getByRole("combobox", { name: "文章管理打开方式" }).waitFor();
+  await settings.waitForFunction(() => document.querySelector("#dashboard-open-mode")?.value === "tab");
+  assert.equal(await settings.getByRole("combobox", { name: "文章管理打开方式" }).inputValue(), "tab");
+  await settings.getByRole("combobox", { name: "文章管理打开方式" }).selectOption("window");
+  await settings.waitForFunction(async () => (await chrome.storage.local.get("dashboardOpenMode")).dashboardOpenMode === "window");
+  await settings.getByRole("button", { name: "打开文章管理", exact: true }).click();
+  assert.equal(context.pages().filter((p) => p.url() === `${origin}/dashboard.html`).length, 2);
+  await dashboardTab.close();
+  ok("dashboard opening mode persists, reuses a browser tab, and switches back to the popup");
 
   const seeded = await page.evaluate(async (base) => {
     const database = await new Promise((resolve, reject) => {
@@ -417,8 +436,6 @@ try {
   await titleInput.fill(revisedTitle);
   await secondCard.click({ position: { x: 8, y: 8 } });
   await firstCard.click({ position: { x: 8, y: 8 } });
-  assert.equal(await titleInput.inputValue(), revisedTitle);
-  await titleInput.press("Control+Enter");
   await detail.getByRole("heading", { name: revisedTitle, exact: true }).waitFor();
   await list.getByRole("button", { name: revisedTitle, exact: true }).waitFor();
   const titleDeadline = Date.now() + 10000;

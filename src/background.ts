@@ -230,6 +230,24 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender, image?: 
   if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
   if (m.type === "dashboard") {
     const url = chrome.runtime.getURL("dashboard.html");
+    const { dashboardOpenMode } = await chrome.storage.local.get("dashboardOpenMode");
+    if (dashboardOpenMode === "tab") {
+      const { dashboardTabId } = await chrome.storage.session.get("dashboardTabId");
+      if (typeof dashboardTabId === "number") {
+        try {
+          const tab = await chrome.tabs.get(dashboardTabId);
+          const window = await chrome.windows.get(tab.windowId);
+          if (tab.url === url && window.type === "normal") {
+            await chrome.windows.update(tab.windowId, { focused: true });
+            await chrome.tabs.update(dashboardTabId, { active: true });
+            return library();
+          }
+        } catch { /* The tab or window was closed while opening. */ }
+      }
+      const opened = await chrome.tabs.create({ url });
+      await chrome.storage.session.set({ dashboardTabId: opened.id });
+      return library();
+    }
     const { dashboardWindowId } = await chrome.storage.session.get("dashboardWindowId");
     if (typeof dashboardWindowId === "number") {
       try {

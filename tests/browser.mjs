@@ -729,12 +729,9 @@ try {
   await titleInput.fill(manualTitle);
   await titleHost.getByRole("button", { name: "最近网页", exact: true }).click();
   await titleHost.getByRole("button", { name: "当前页面", exact: true }).click();
-  assert.equal(await titleInput.inputValue(), manualTitle);
+  await eventually(async () => await titleHost.locator(".page-title-row h3").innerText() === manualTitle, "title saves on outside click");
   await titlePage.setViewportSize({ width: 360, height: 740 });
-  await titlePage.screenshot({ path: join(out, "title-editor-narrow.png") });
   assert.equal(await titleHost.locator(".page-head").evaluate(el => el.scrollWidth <= el.clientWidth), true);
-  await titleInput.press("Control+Enter");
-  await eventually(async () => await titleHost.locator(".page-title-row h3").innerText() === manualTitle, "manual title save");
   await titlePage.screenshot({ path: join(out, "title-saved-narrow.png") });
   await titleHost.getByRole("button", { name: "编辑标题", exact: true }).click();
   await titleInput.fill("取消的修改");

@@ -102,6 +102,18 @@ section {
   font-size: 12px;
   color: #a7b5c6;
 }
+select {
+  font: inherit;
+  color: #e1e8f0;
+  background: #141a22;
+  border: 1px solid #627086;
+  border-radius: 7px;
+  padding: 9px 12px;
+}
+select:focus-visible {
+  outline: 2px solid #72e0bc;
+  outline-offset: 3px;
+}
 .transcript-setting { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
 .transcript-setting input { width: 90px; padding: 7px 10px; border: 1px solid #627086; border-radius: 6px; background: #141a22; color: inherit; font: inherit; }
 .setting-switch {
