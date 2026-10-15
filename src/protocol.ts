@@ -1,4 +1,4 @@
-import type { MarkAnchor, Color, Library, PageTool, VideoCueRef, VideoMark } from "./model";
+import type { MarkAnchor, Color, Entry, Library, PageTool, VideoCueRef, VideoMark } from "./model";
 import type { CaptureRect } from "./video-capture";
 import type { BulkAction, TaxonomyAction } from "./taxonomy";
 export type Mutation = {
@@ -67,6 +67,7 @@ export type Request =
       expectedTaxonomy?: string;
     }
   | { type: "snapshot"; refresh?: boolean }
+  | { type: "page-snapshot"; url: string; refresh?: boolean }
   | { type: "highlight-palette"; colors: Color[] }
   | { type: "show-page-tools"; enabled: boolean; tool?: PageTool }
   | { type: "auto-generate-markdown"; enabled: boolean }
@@ -78,6 +79,7 @@ export type Request =
       mark: Mutation;
       imageSource?: string;
     }
+  | { type: "save-page"; url: string; title: string; favicon: string; mark: Mutation }
   | {
       type: "delete";
       pageId: string;
@@ -91,6 +93,12 @@ export type Request =
   | { type: "open"; url: string }
   | { type: "directory-connected" };
 export async function request(message: Request): Promise<Library> {
+  const response = await chrome.runtime.sendMessage(message);
+  if (!response?.ok)
+    throw Error(response?.error || "插件连接已断开，请刷新网页");
+  return response.data;
+}
+export async function requestPageSave(message: Extract<Request, { type: "save-page" }>): Promise<{ entry: Entry; status: string; lastColor: Color }> {
   const response = await chrome.runtime.sendMessage(message);
   if (!response?.ok)
     throw Error(response?.error || "插件连接已断开，请刷新网页");

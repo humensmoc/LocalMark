@@ -185,6 +185,7 @@ export type Entry = {
   legacyMdBase?: string | null;
 };
 export type Library = {
+  migrationVersion?: 1;
   highlightPalette?: Color[];
   showPageTools?: boolean;
   pageTools?: Partial<Record<PageTool, boolean>>;

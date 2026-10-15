@@ -41,6 +41,7 @@ const serial = <T>(fn: () => Promise<T>): Promise<T> => {
 };
 async function library() {
   const lib = (await db.get<Library>("library")) ?? emptyLibrary();
+  if (lib.migrationVersion === 1) return lib;
   const beforeMigration = JSON.stringify(lib);
   // Existing installations also opt in explicitly; a missing setting stays off.
   lib.autoGenerateMarkdown = lib.autoGenerateMarkdown === true;
@@ -53,6 +54,7 @@ async function library() {
     }
   }
   migrateTaxonomy(lib);
+  lib.migrationVersion = 1;
   if (changed || JSON.stringify(lib) !== beforeMigration) await db.set("library", lib);
   return lib;
 }
@@ -109,6 +111,14 @@ async function notify() {
 const pendingPages = new Set<string>();
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
 let flushQueued = false;
+let notifyTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleNotify() {
+  if (notifyTimer) return;
+  notifyTimer = setTimeout(() => {
+    notifyTimer = undefined;
+    void notify().catch(() => {});
+  }, 200);
+}
 function scheduleSync(id = "") {
   pendingPages.add(id);
   if (flushTimer || flushQueued) return;
@@ -128,7 +138,71 @@ function scheduleSync(id = "") {
         if (pendingPages.size) scheduleSync(next);
       }
     }).catch(() => {});
-  }, 75);
+  }, 750);
+}
+async function savePage(m: Extract<Request, { type: "save-page" }>, sender: chrome.runtime.MessageSender) {
+  if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
+  const url = canonicalUrl(m.url);
+  if (!/^https?:\/\//.test(url)) throw Error("仅支持 HTTP/HTTPS 网页");
+  if (sender.tab?.url && canonicalUrl(sender.tab.url) !== url)
+    throw Error("网页已切换，请重新选择文字");
+  if (m.mark.anchor.kind === "element") throw Error("仅支持文字批注");
+  let meta = await db.getLibraryMeta();
+  if (meta?.migrationVersion !== 1) {
+    await library();
+    meta = await db.getLibraryMeta();
+  }
+  if (!meta) throw Error("浏览器资料尚未初始化");
+  const id = await db.getLibraryEntryIdForUrl(url) ?? await pageId(url);
+  const now = new Date().toISOString();
+  let entry = await db.getLibraryEntry(id);
+  if (entry && entry.page.url !== url) throw Error("网页 ID 冲突，请刷新后重试");
+  if (!entry) {
+    const title = (m.title || new URL(url).hostname).slice(0, 1000);
+    const page: Page = {
+      schemaVersion: 2, id, url, originalUrl: m.url, title,
+      favicon: /^https?:\/\//.test(m.favicon) ? m.favicon : "",
+      folderName: folderName(title, id), createdAt: now, updatedAt: now,
+      annotations: [], tags: [], category: DEFAULT_CATEGORY,
+      categoryId: UNCATEGORIZED, tagIds: [],
+    };
+    entry = { page, baseJson: null, baseMd: null, dirty: true, mdDirty: true };
+  }
+  const old = m.mark.id ? entry.page.annotations.find(mark => mark.id === m.mark.id) : undefined;
+  if (m.mark.id && (!old || old.updatedAt !== m.mark.expectedUpdatedAt || JSON.stringify(old) !== m.mark.expectedMark))
+    throw Error("此标注已在其他标签页或文件中修改，请刷新后再编辑。当前输入尚未保存。");
+  const time = old && now <= old.updatedAt ? new Date(Date.parse(old.updatedAt) + 1).toISOString() : now;
+  const mark = MarkSchema.parse({
+    ...m.mark, id: old?.id ?? crypto.randomUUID(), createdAt: old?.createdAt ?? time,
+    updatedAt: time, tags: old?.tags ?? [],
+  });
+  if (old) entry.page.annotations[entry.page.annotations.indexOf(old)] = mark;
+  else entry.page.annotations.push(mark);
+  entry.page.updatedAt = time;
+  entry.dirty = entry.mdDirty = true;
+  const hasRoot = !!(await db.get<FileSystemDirectoryHandle>("root"));
+  const status = hasRoot ? "已暂存浏览器，正在写入文件" : "尚未连接文件夹；已暂存浏览器，待同步";
+  await db.saveLibraryEntry(id, entry, { lastColor: mark.color, status });
+  if (hasRoot) scheduleSync(id);
+  scheduleNotify();
+  return { entry, status, lastColor: mark.color };
+}
+async function pageSnapshot(m: Extract<Request, { type: "page-snapshot" }>, sender: chrome.runtime.MessageSender) {
+  if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
+  const url = canonicalUrl(m.url);
+  if (!/^https?:\/\//.test(url)) throw Error("仅支持 HTTP/HTTPS 网页");
+  if (sender.tab?.url && canonicalUrl(sender.tab.url) !== url)
+    throw Error("网页已切换，请重试");
+  let meta = await db.getLibraryMeta();
+  if (meta?.migrationVersion !== 1) {
+    await library();
+    meta = await db.getLibraryMeta();
+  }
+  if (!meta) throw Error("浏览器资料尚未初始化");
+  const id = await db.getLibraryEntryIdForUrl(url) ?? await pageId(url);
+  const entry = await db.getLibraryEntry(id);
+  if (m.refresh && await db.get<FileSystemDirectoryHandle>("root")) scheduleSync(id);
+  return { ...meta, entries: entry ? { [id]: entry } : {} };
 }
 function isLibraryUI(sender: chrome.runtime.MessageSender) {
   return ["dashboard.html", "sidepanel.html"].some(path => sender.url === chrome.runtime.getURL(path));
@@ -208,7 +282,7 @@ async function videoMutation(m: Extract<Request, { type: "video-save" | "video-d
         categoryId: UNCATEGORIZED, tagIds: [] };
       entry = lib.entries[id] = { page, baseJson: null, baseMd: null, dirty: true, mdDirty: true };
     }
-    migrateTaxonomy(lib);
+    // library() migrated existing entries once; new pages already use ID relations.
     entry.page.schemaVersion = 5;
     entry.page.videoMarks ??= [];
     if (old) entry.page.videoMarks[entry.page.videoMarks.findIndex(item => item.id === old.id)] = mark;
@@ -367,7 +441,7 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender, image?: 
     if (!e) {
       const title = ((m.type === "page-title" ? m.title.trim() : m.title) || new URL(url).hostname).slice(0, 1000);
       const p: Page = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         id,
         url,
         originalUrl: m.url,
@@ -379,6 +453,8 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender, image?: 
         annotations: [],
         tags: [],
         category: DEFAULT_CATEGORY,
+        categoryId: UNCATEGORIZED,
+        tagIds: [],
       };
       e = lib.entries[id] = {
         page: p,
@@ -388,7 +464,7 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender, image?: 
         mdDirty: true,
       };
     }
-    migrateTaxonomy(lib);
+    // Existing pages were migrated by library(); a new page starts at schema v2.
     if (m.type === "page-title") {
       e.page.title = m.title.trim();
       e.page.updatedAt = now;
@@ -490,6 +566,8 @@ async function handle(m: Request, sender: chrome.runtime.MessageSender, image?: 
 }
 async function dispatch(m: Request | ImportRequest, sender: chrome.runtime.MessageSender) {
   if (sender.id !== chrome.runtime.id) throw Error("来源不受信任");
+  if (m.type === "page-snapshot") return serial(() => pageSnapshot(m, sender));
+  if (m.type === "save-page") return serial(() => savePage(m, sender));
   if (m.type === "page-delete") {
     if (sender.url !== chrome.runtime.getURL("sidepanel.html"))
       throw Error("请在当前页面侧栏中删除网页数据。");
@@ -692,6 +770,7 @@ void chrome.alarms.create("retry-sync", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "retry-sync")
     void serialFiles(async () => {
+      if (!await db.get<FileSystemDirectoryHandle>("root")) return;
       const lib = await serial(library);
       const ids = new Set(Object.entries(lib.entries)
         .filter(([, e]) => e.dirty || e.mdDirty || e.issue?.kind === "io")

@@ -117,6 +117,31 @@ try {
   await editor.getByRole("button", { name: "保存", exact: true }).click(); await until(async () => (await marks()).length === 1);
   await editor.waitFor({ state: "detached" });
   assert.equal((await marks())[0].note, expected);
+  const stored = await settings.evaluate(async () => {
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("local-web-clipper", 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = database.transaction("kv");
+    const store = transaction.objectStore("kv");
+    const read = key => new Promise((resolve, reject) => {
+      const request = store.get(key);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const meta = await read("library:meta");
+    const entries = await new Promise((resolve, reject) => {
+      const request = store.getAll(IDBKeyRange.bound("library:entry:", "library:entry:\uffff"));
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return { meta, entries, legacy: await read("library") };
+  });
+  assert.equal(stored.meta.migrationVersion, 1);
+  assert.equal(stored.entries.length, 1);
+  assert.equal(stored.entries[0].page.annotations[0].note, expected);
+  assert.equal(stored.legacy, undefined);
   ok("typing expands, Chinese composition does not submit, multiline save-button and dragging preserve focus and text");
   await page.locator("#first b").click(); await editor.waitFor(); await finish();
   assert.equal(await note.inputValue(), expected);
@@ -236,6 +261,46 @@ try {
   await page.keyboard.press("Escape");
   await editor.waitFor({ state: "detached" });
   ok("links inside highlighted text navigate normally while adjacent highlighted text still edits the mark");
+  await settings.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("local-web-clipper", 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = database.transaction("kv", "readwrite");
+      tx.objectStore("kv").put(root, "pendingRoot");
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  });
+  const connected = await settings.evaluate(() => chrome.runtime.sendMessage({ type: "directory-connected" }));
+  assert.equal(connected.ok, true, connected.error);
+  await page.locator("#first b").click(); await editor.waitFor(); await finish();
+  await note.fill("文件同步后的批注");
+  await editor.getByRole("button", { name: "保存", exact: true }).click();
+  await editor.waitFor({ state: "detached" });
+  const savedId = Object.values((await state()).entries).find(entry => entry.page.url === url).page.id;
+  await until(async () => settings.evaluate(async id => {
+    try {
+      const root = await navigator.storage.getDirectory();
+      const data = await root.getDirectoryHandle("data");
+      for await (const [, month] of data.entries()) {
+        if (month.kind !== "directory") continue;
+        for await (const [, day] of month.entries()) {
+          if (day.kind !== "directory") continue;
+          for await (const [name, file] of day.entries()) {
+            if (file.kind === "file" && name.endsWith(id + ".json") &&
+                (await (await file.getFile()).text()).includes("文件同步后的批注")) return true;
+          }
+        }
+      }
+      return false;
+    } catch { return false; }
+  }, savedId));
+  assert.equal((await marks()).find(mark => mark.note === "文件同步后的批注")?.note, "文件同步后的批注");
+  ok("text save commits to browser cache before the scheduled file writer and later reaches the connected folder");
   assert.deepEqual(errors, []);
   await writeFile(join(out, "results.json"), JSON.stringify({ version: JSON.parse(await readFile("package.json", "utf8")).version, checks, errors }, null, 2));
 } finally { await context.close(); await new Promise(r => server.close(r)); }

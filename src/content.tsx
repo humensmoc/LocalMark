@@ -17,7 +17,7 @@ import {
 import { captureSelection, HOST, Painter } from "./anchors";
 import { captureElement, locateElement } from "./element-anchors";
 import { ElementOverlays, ElementPicker, ElementPickButton, AnnotationVisibilityButton, SidePanelButton } from "./ElementUI";
-import { request } from "./protocol";
+import { request, requestPageSave } from "./protocol";
 import { Icon } from "./Icon";
 import { Floating, FloatingPresence } from "./Floating";
 import style from "./ui.css?inline";
@@ -119,7 +119,7 @@ function App() {
   async function load(refresh = false) {
     const g = ++refreshGeneration.current;
     try {
-      const next = await request({ type: "snapshot", refresh });
+      const next = await request({ type: "page-snapshot", url: location.href, refresh });
       if (g === refreshGeneration.current) { setLib(next); setLibraryReady(true); }
     } catch (e) {
       tell(String(e));
@@ -495,8 +495,7 @@ function App() {
     setBusy(true);
     setError("");
     try {
-      const next = await request({
-        type: "save",
+      const payload = {
         url: location.href,
         title: document.title,
         favicon:
@@ -513,12 +512,18 @@ function App() {
           note: d.note,
           color: color ?? d.color,
         },
-      });
-      setLib(next);
+      };
+      const status = d.anchor.kind !== "element"
+        ? await requestPageSave({ ...payload, type: "save-page" }).then(result => {
+            setLib(previous => ({ ...previous, status: result.status, lastColor: result.lastColor,
+              entries: { ...previous.entries, [result.entry.page.id]: result.entry } }));
+            return result.status;
+          })
+        : await request({ ...payload, type: "save" }).then(next => { setLib(next); return next.status; });
       setDraft((active) => active === d ? null : active);
       setRebind(null);
       getSelection()?.removeAllRanges();
-      tell(next.status);
+      tell(status);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
