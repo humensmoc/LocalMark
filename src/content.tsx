@@ -383,6 +383,10 @@ function App() {
       if (snapshot.current.picking) return;
       if (e.composedPath().some((n) => n instanceof Element && n.id === HOST))
         return;
+      // A marked link keeps its native navigation. The mark remains editable
+      // from highlighted text outside the link or from the side panel.
+      if (e.composedPath().some((n) => n instanceof Element && n.matches("a[href], area[href]")))
+        return;
       if (!getSelection()?.isCollapsed) return;
       const hits = painter.hit(e.clientX, e.clientY);
       if (!hits.length) {

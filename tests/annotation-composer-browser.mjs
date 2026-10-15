@@ -206,6 +206,36 @@ try {
   assert.equal((await marks())[0].note, expected);
   await editor.waitFor({ state: "detached" });
   ok("top-row deletion works at 320px; compact new/existing notes hide save until expansion");
+  await page.setViewportSize({ width: 1200, height: 850 });
+  await page.evaluate(() => {
+    const paragraph = document.createElement("p");
+    paragraph.id = "link-mark";
+    paragraph.style.display = "inline-block";
+    paragraph.innerHTML = 'Read the <a id="marked-link" href="#linked-destination">video link</a> for the full story.';
+    document.querySelector("main").append(paragraph);
+    const destination = document.createElement("div");
+    destination.id = "linked-destination";
+    document.querySelector("main").append(destination);
+  });
+  await select("#link-mark");
+  await editor.locator(".swatch").first().click();
+  await until(async () => (await marks()).length === 2);
+  await editor.waitFor({ state: "detached" });
+  await page.locator("#marked-link").click();
+  assert.equal(new URL(page.url()).hash, "#linked-destination");
+  assert.equal(await editor.count(), 0, "link click must not open the annotation editor");
+  await page.locator("#link-mark").scrollIntoViewIfNeeded();
+  const textPoint = await page.locator("#link-mark").evaluate(el => {
+    const range = document.createRange();
+    range.setStart(el.firstChild, 1); range.setEnd(el.firstChild, 4);
+    const rect = range.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  });
+  await page.mouse.click(textPoint.x, textPoint.y);
+  await editor.waitFor();
+  await page.keyboard.press("Escape");
+  await editor.waitFor({ state: "detached" });
+  ok("links inside highlighted text navigate normally while adjacent highlighted text still edits the mark");
   assert.deepEqual(errors, []);
   await writeFile(join(out, "results.json"), JSON.stringify({ version: JSON.parse(await readFile("package.json", "utf8")).version, checks, errors }, null, 2));
 } finally { await context.close(); await new Promise(r => server.close(r)); }
