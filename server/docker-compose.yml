@@ -1,0 +1,17 @@
+services:
+  localmark-api:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    environment:
+      LOCALMARK_HOST: 0.0.0.0
+      LOCALMARK_PORT: 8000
+      LOCALMARK_DB_PATH: /data/localmark.sqlite3
+    volumes:
+      - localmark-data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  localmark-data:

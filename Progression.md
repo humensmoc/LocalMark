@@ -62,6 +62,18 @@
 
 #### 会话补充
 
+- 2026-10-18 · `local-worktree-change-inspection`：只读核对当前未提交改动：插件源码与 `package.json`、`package-lock.json`、`public/manifest.json`、`dist/manifest.json` 均仍为 0.3.43；`server/` 是此前新增的 LocalMark 云端同步最小后端原型及本地 SQLite 测试数据库，`Progression.md` 则包含此前会话记录更新。本轮仅解释现有改动并补记演进记录，无插件功能改动，不升版、不构建、不运行产品测试；集中会话日志已按技能规则写入。
+
+- 2026-10-07 · `remote-storage-stack-role-mapping`：解释最小原型与正式技术栈的对应关系：标准库 HTTP Server 是低层 HTTP 服务实现，FastAPI 是更高层 Web API 框架且通常配合 Uvicorn；SQLite 与 PostgreSQL 都是关系数据库但部署和并发能力不同；scrypt 是密码哈希算法，不因换 FastAPI 自动替换；Bearer Token 是认证传输方式；SQLAlchemy 是数据库访问/ORM 层，Alembic 是数据库结构迁移工具。本轮仅概念说明，无插件功能改动，不升版、不构建、不运行产品测试。
+
+- 2026-10-07 · `remote-storage-prototype-implementation`：新增 `server/` 最小后端原型，使用 Python 标准库 HTTP 服务、SQLite、scrypt 密码哈希和 Bearer 会话，实现注册、登录、网页 JSON 创建/读取/更新、`If-Match` revision 乐观并发控制及 409 冲突响应；提供浏览器测试页、Docker Compose、Caddy/Tunnel 部署说明。实际启动临时端口完成注册、登录、创建、读取、revision=1 更新为 2 以及旧 revision 冲突测试，接口返回符合预期；未运行 Unity、未升级插件版本，生产使用前仍需 HTTPS、限流、邮箱验证、备份和 FastAPI/PostgreSQL 化。
+
+- 2026-10-07 · `remote-storage-boundaries-and-conflicts`：解释 Cloudflare Tunnel 不是后端必需组件，而是服务器暴露 HTTPS 服务的一种方式；说明 LocalMark 可在同一仓库中维护扩展、FastAPI 后端和部署配置，但开发时分别启动，生产时分别作为扩展构建产物与后端容器运行。数据同步建议采用 `revision`/`If-Match` 乐观并发控制，冲突返回 409 并提供服务器版、本地版和按标注 ID 合并选项，避免最后写入覆盖他人修改。本轮仅架构说明，无插件功能改动，不升版、不构建、不运行产品测试。
+
+- 2026-10-07 · `remote-storage-stack-overview`：进一步将云端化方案拆成浏览器扩展、HTTPS API、认证、业务服务、PostgreSQL、媒体文件存储、反向代理/Cloudflare Tunnel 和备份监控层；推荐第一版采用 TypeScript 扩展 + Python FastAPI + PostgreSQL + Docker Compose + Caddy/Cloudflare Tunnel，保留本地 JSON/Markdown 导入导出作为迁移与备份能力。本轮仅架构说明，无插件功能改动，不升版、不构建、不运行产品测试。
+
+- 2026-10-07 · `remote-storage-registration-architecture`：结合对话日记与当前代码，确认现有服务器是香港阿里云 ECS（记录为 Ubuntu 22.04、2 核 4 GB、约 40 GB ESSD），已部署 Umami 与 PostgreSQL，`stats.humensmoc.com` 经 Cloudflare Tunnel 接入；尚无证据表明 LocalMark 业务 API 已部署。LocalMark 当前仍以浏览器 IndexedDB 暂存，并通过 File System Access API 同步用户授权目录中的 JSON、Markdown 与图片。讨论了“FastAPI + PostgreSQL + Caddy/HTTPS + `api.humensmoc.com`”的账号与云端资料架构，建议先做本地文件与云端的双写/迁移过渡，不直接替换现有文件同步。本轮仅方案讨论与只读核对，无插件功能改动，不升版、不构建、不运行产品测试。
+
 - 2026-10-03 · `bookmark-read-later-product-boundary`：针对“只收藏”与“以后有空看”的轻量需求讨论与现有标注资料库的边界。建议保持单一网页记录，把“收藏”作为长期保留意图、“稍后看”作为可完成的阅读队列，高亮、批注、评论、分类与评分继续属于深度整理层；三者用独立入口和视图呈现，底层不重复建档。稍后看完成后可选保留为收藏或移出，产生标注时自然进入资料库。本轮仅产品方案与只读核对，无插件功能改动，不升版、不构建、不运行产品测试。
 - 2026-10-08 · `server-backend-storage-adapter-review`：用户希望后端上服务器、账号登录，并通过清晰接口切换本地存储、服务器存储及不同服务器。只读核对实验项目：`D:/AI/meowa-outline`（2026-09-27 四个提交）在 Outline 内新增 `webAnnotations.list/read/write/connect`，服务端直接把管理员配置目录中的 LocalMark JSON 文件当存储，单一全局库、整文件 SHA-256 修订号乐观并发、目录锁、每次 list 全量读文件；配套插件仅存在于 `D:/AI/localmark-extension/dist`（0.2.54 构建产物），其 `RemoteFiles` 复用 `Files` 接口但服务器地址硬编码为 `wiki.meowa.ai`，本仓库 Git 历史中没有对应源码，主线由 0.2.53 直接进入 0.3.0。结合当前主线：`SyncEngine` 已依赖 `Files` 接口，但 IndexedDB 整库单值存储、多处模块直接访问目录句柄、硬删除无墓碑、无逐记录版本号与变更游标，不适合直接接入多设备服务端同步。建议方案：以逐记录 Repository/SyncAdapter 接口（pull 变更游标、push 幂等操作、墓碑、版本号）取代文件路径接口，本地 IndexedDB 作为离线缓存与待上传队列，后端独立服务（账号、令牌、workspace 权限、数据库与对象存储），服务器地址与存储模式可在设置中配置；Outline 集成降为可选消费方。仅讨论与只读排查，尚未实施；五处版本未改动（当前 0.3.43），无插件功能改动，不升版、不构建、不运行测试。
 - 2026-10-09 · `backend-storage-interface-draft`：按上一轮建议新增 [doc/后端与存储接口草案.md](doc/后端与存储接口草案.md)。内容包括：分层（LibraryRepository / LocalCache / SyncCoordinator / SyncAdapter）；把 Page 拆成 page/mark/videoMark/taxon/workspaceSettings 记录，带 version 与墓碑，媒体按内容哈希引用；StorageProfile 多服务器配置与按配置隔离的缓存库；幂等 LocalOp 与 outbox，以及现有 Request 消息到 op 的映射；字段级三方合并规则；AuthSession（OAuth PKCE、刷新令牌轮换）；HTTP API v1（meta、auth、workspaces、changes 游标、ops 批量推送、URL lookup、media）；服务端表结构参考、迁移路径、五阶段实施顺序与待确认问题。状态为草案，尚未实施；仅文档改动，五处版本保持 0.3.43，无插件功能改动，不升版、不构建、不运行测试。

@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LocalMark 后端原型</title>
+<style>
+  body { max-width: 860px; margin: 32px auto; padding: 0 16px; font: 15px system-ui, sans-serif; }
+  input, textarea, button { font: inherit; padding: 8px; margin: 4px 0; }
+  input { width: 260px; } textarea { width: 100%; min-height: 180px; box-sizing: border-box; }
+  button { cursor: pointer; } section { border: 1px solid #ccc; padding: 16px; margin: 16px 0; border-radius: 8px; }
+  #status { white-space: pre-wrap; background: #f5f5f5; padding: 10px; }
+</style>
+<h1>LocalMark 后端原型</h1>
+<p>建议打开两个浏览器标签页，登录同一账号，测试 revision 冲突。</p>
+
+<section>
+  <h2>注册 / 登录</h2>
+  <input id="email" type="email" placeholder="email@example.com">
+  <input id="password" type="password" placeholder="至少 8 位密码">
+  <button onclick="register()">注册</button>
+  <button onclick="login()">登录</button>
+</section>
+
+<section>
+  <h2>网页数据</h2>
+  <input id="pageId" value="demo-page">
+  <textarea id="data">{"title":"第一次云端测试","note":"在这里修改内容"}</textarea><br>
+  <button onclick="createPage()">首次创建</button>
+  <button onclick="loadPage()">读取服务器版本</button>
+  <button onclick="savePage()">保存当前版本</button>
+</section>
+<pre id="status">尚未操作</pre>
+<script>
+const tokenKey = 'localmark-prototype-token';
+const $ = id => document.getElementById(id);
+const token = () => localStorage.getItem(tokenKey);
+function show(value) { $('status').textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); }
+async function request(path, options = {}) {
+  const headers = {'Content-Type': 'application/json', ...(options.headers || {})};
+  if (token()) headers.Authorization = `Bearer ${token()}`;
+  const response = await fetch(path, {...options, headers});
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw body;
+  return body;
+}
+async function register() { try { const r = await request('/api/auth/register', {method:'POST', body:JSON.stringify({email:$('email').value,password:$('password').value})}); localStorage.setItem(tokenKey, r.token); show(r); } catch (e) { show(e); } }
+async function login() { try { const r = await request('/api/auth/login', {method:'POST', body:JSON.stringify({email:$('email').value,password:$('password').value})}); localStorage.setItem(tokenKey, r.token); show(r); } catch (e) { show(e); } }
+async function createPage() { try { const r = await request('/api/pages', {method:'POST', body:JSON.stringify({pageId:$('pageId').value,data:JSON.parse($('data').value)})}); $('data').dataset.revision=r.revision; show(r); } catch (e) { show(e); } }
+async function loadPage() { try { const r = await request(`/api/pages/${encodeURIComponent($('pageId').value)}`); $('data').value=JSON.stringify(r.data,null,2); $('data').dataset.revision=r.revision; show(r); } catch (e) { show(e); } }
+async function savePage() { try { const revision=$('data').dataset.revision; const r = await request(`/api/pages/${encodeURIComponent($('pageId').value)}`, {method:'PUT',headers:{'If-Match':revision},body:JSON.stringify({data:JSON.parse($('data').value)})}); $('data').dataset.revision=r.revision; show(r); } catch (e) { show(e); } }
+</script>

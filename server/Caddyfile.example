@@ -1,0 +1,7 @@
+# 方案 A：服务器有公网 IP，Caddy 直接负责 HTTPS 和反向代理。
+api.example.com {
+    reverse_proxy 127.0.0.1:8000
+}
+
+# 如果使用 Cloudflare Tunnel，则不需要把这个站点直接暴露给公网；
+# cloudflared 将 api.example.com 转发到 http://127.0.0.1:8000 即可。
